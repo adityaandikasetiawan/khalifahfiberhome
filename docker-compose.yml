@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: isp_billing
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NOTE: pada skenario ini backend berjalan sebagai 1 instance (dev/staging),
+  # sehingga cron job (invoice generator, reminder, isolir) dan BullMQ processor
+  # aman berjalan di proses yang sama. Saat production di-scale ke PM2 cluster
+  # mode (>1 instance), pisahkan proses cron ke instance khusus (mis. jalankan
+  # dengan env DISABLE_CRON=true di instance API, dan hanya aktifkan ScheduleModule
+  # pada satu proses worker) agar invoice tidak double-generate -- lihat catatan
+  # di README bagian "Deployment Produksi".
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000/api/v1
+    ports:
+      - "3001:3001"
+
+  customer-site:
+    build: ./frontend-customer
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000/api/v1
+    ports:
+      - "3002:3002"
+
+volumes:
+  postgres_data:
