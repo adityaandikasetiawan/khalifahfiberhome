@@ -46,3 +46,6 @@ backend/.wwebjs_cache/
 
 # Kiro local config
 .kiro/
+
+# Database backups (berisi data pelanggan / PII)
+db-backups/

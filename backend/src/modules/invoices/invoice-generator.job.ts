@@ -32,8 +32,17 @@ export class InvoiceGeneratorJob {
     const dueSubscriptions = await this.subscriptionsService.findActiveDueToday(today);
     this.logger.log(`Ditemukan ${dueSubscriptions.length} subscription jatuh tempo hari ini`);
 
+    const now = new Date();
     for (const subscription of dueSubscriptions) {
       try {
+        // Guard: jangan tagih sebelum masa aktif dimulai (startDate).
+        // Dipakai a.l. untuk menunda penagihan pelanggan migrasi ke bulan berikutnya.
+        if (subscription.startDate && new Date(subscription.startDate) > now) {
+          this.logger.log(
+            `Lewati subscription ${subscription.id}: startDate ${new Date(subscription.startDate).toISOString().split("T")[0]} belum tiba`,
+          );
+          continue;
+        }
         const invoice = await this.invoicesService.generateMonthlyInvoiceForSubscription(subscription);
         await this.notificationsQueue.add("invoice_created", {
           customerId: subscription.customer.id,
