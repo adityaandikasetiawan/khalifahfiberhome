@@ -32,6 +32,12 @@ export class PortalController {
   @Post("invoices/:id/pay")
   @ApiOperation({ summary: "Mulai pembayaran untuk tagihan milik sendiri (verifikasi kepemilikan otomatis)" })
   payInvoice(@Req() req: any, @Param("id") id: string, @Body() dto: PayInvoiceDto) {
-    return this.service.payInvoice(req.user.customerId, id, dto.paymentMethod);
+    return this.service.payInvoice(req.user.customerId, id, dto.paymentMethod, dto.paymentChannel);
+  }
+
+  @Post("invoices/:id/check-payment")
+  @ApiOperation({ summary: "Cek status pembayaran ke gateway (fallback jika webhook belum masuk)" })
+  checkPayment(@Req() req: any, @Param("id") id: string) {
+    return this.service.checkPayment(req.user.customerId, id);
   }
 }

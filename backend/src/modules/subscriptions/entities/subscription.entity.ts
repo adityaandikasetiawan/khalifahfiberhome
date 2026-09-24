@@ -3,7 +3,7 @@ import { Customer } from "../../customers/entities/customer.entity";
 import { Package } from "../../packages/entities/package.entity";
 import { Invoice } from "../../invoices/entities/invoice.entity";
 
-export type SubscriptionStatus = "active" | "suspended" | "cancelled";
+export type SubscriptionStatus = "active" | "suspended" | "cancelled" | "pending_activation";
 
 @Entity("subscriptions")
 export class Subscription {
@@ -30,7 +30,7 @@ export class Subscription {
   @Column({ type: "int", comment: "Tanggal jatuh tempo tiap bulan, 1-28" })
   billingDay: number;
 
-  @Column({ type: "enum", enum: ["active", "suspended", "cancelled"], default: "active" })
+  @Column({ type: "enum", enum: ["active", "suspended", "cancelled", "pending_activation"], default: "active" })
   status: SubscriptionStatus;
 
   @Column({ nullable: true, comment: "Mapping ke profile PPPoE/Mikrotik" })

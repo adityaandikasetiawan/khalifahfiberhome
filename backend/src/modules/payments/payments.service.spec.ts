@@ -7,6 +7,7 @@ import { PaymentsService } from "./payments.service";
 import { Payment } from "./entities/payment.entity";
 import { InvoicesService } from "../invoices/invoices.service";
 import { MidtransProvider } from "./gateways/midtrans.provider";
+import { IpaymuProvider } from "./gateways/ipaymu.provider";
 
 /**
  * Test ini fokus pada bagian PALING KRITIS di seluruh sistem: idempotency
@@ -33,6 +34,7 @@ describe("PaymentsService - webhook idempotency", () => {
   const mockNotificationsQueue = { add: jest.fn() };
   const mockIsolirQueue = { add: jest.fn() };
   const mockMidtransProvider = { createTransaction: jest.fn(), verifySignature: jest.fn() };
+  const mockIpaymuProvider = { createTransaction: jest.fn(), checkTransaction: jest.fn(), verifyCallback: jest.fn() };
   // get() default mengembalikan undefined -- artinya PAYMENT_PROVIDER tidak
   // di-set ke "mock", jadi test ini menguji jalur gateway sungguhan (seperti production)
   const mockConfigService = { get: jest.fn().mockReturnValue(undefined) };
@@ -46,6 +48,7 @@ describe("PaymentsService - webhook idempotency", () => {
         { provide: getRepositoryToken(Payment), useValue: mockPaymentRepo },
         { provide: InvoicesService, useValue: mockInvoicesService },
         { provide: MidtransProvider, useValue: mockMidtransProvider },
+        { provide: IpaymuProvider, useValue: mockIpaymuProvider },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: getQueueToken("notifications"), useValue: mockNotificationsQueue },
         { provide: getQueueToken("isolir"), useValue: mockIsolirQueue },
@@ -124,7 +127,11 @@ describe("PaymentsService - webhook idempotency", () => {
       rawPayload: {},
     });
 
-    expect(mockIsolirQueue.add).toHaveBeenCalledWith("activate", { subscriptionId: "sub-2" });
+    expect(mockIsolirQueue.add).toHaveBeenCalledWith(
+      "activate",
+      expect.objectContaining({ subscriptionId: "sub-2", invoiceId: "inv-2" }),
+      expect.objectContaining({ attempts: expect.any(Number) }),
+    );
   });
 
   it("TIDAK membuat tugas aktivasi jika subscription memang masih aktif (bukan hasil isolir)", async () => {

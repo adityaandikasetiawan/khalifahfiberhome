@@ -29,3 +29,20 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Env backups (may contain secrets)
+.env.backup*
+*.env.backup*
+backend/.env.backup*
+
+# WhatsApp Web session/cache (device credentials)
+.wwebjs_auth/
+.wwebjs_cache/
+backend/.wwebjs_auth/
+backend/.wwebjs_cache/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Kiro local config
+.kiro/

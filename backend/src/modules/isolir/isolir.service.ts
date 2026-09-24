@@ -56,6 +56,115 @@ export class IsolirService {
     return task;
   }
 
+  /**
+   * AKTIVASI OTOMATIS setelah pembayaran lunas — tanpa menunggu teknisi.
+   * Dipanggil oleh IsolirProcessor untuk job "activate". Langsung:
+   *   1. enable PPPoE secret di router (jika subscription tertaut router),
+   *   2. set status subscription menjadi active,
+   *   3. catat log & kirim notifikasi WhatsApp "layanan aktif".
+   *
+   * Jika router tak terjangkau, error dilempar agar BullMQ me-retry job.
+   * Status subscription hanya diubah setelah router berhasil di-enable
+   * (atau ketika subscription memang tidak tertaut router).
+   */
+  async activateSubscription(subscriptionId: string, invoiceId?: string) {
+    const subscription = await this.subscriptionsService.findOne(subscriptionId);
+
+    if (subscription.routerId && subscription.pppoeUsername) {
+      const success = await this.mikrotikService.activatePppoe(
+        subscription.routerId,
+        subscription.pppoeUsername,
+      );
+      if (!success) {
+        // Lempar error -> BullMQ retry (router mungkin sedang tak terjangkau).
+        throw new Error(
+          `Gagal enable PPPoE "${subscription.pppoeUsername}" di router untuk subscription ${subscriptionId}`,
+        );
+      }
+      this.logger.log(`PPPoE "${subscription.pppoeUsername}" di-enable otomatis (pembayaran lunas)`);
+    } else {
+      this.logger.log(
+        `Subscription ${subscriptionId} belum tertaut router; aktivasi hanya update status di billing`,
+      );
+    }
+
+    // Sinkronkan status di database
+    await this.subscriptionsService.activate(subscriptionId);
+    await this.logRepo.save(
+      this.logRepo.create({
+        subscriptionId,
+        action: "activate",
+        reason: "Pembayaran lunas - aktivasi otomatis",
+        triggeredBy: "system",
+      }),
+    );
+
+    // Catatan: notifikasi "payment_success" ke pelanggan sudah dikirim oleh
+    // PaymentsService.handleWebhook untuk setiap pembayaran lunas, jadi TIDAK
+    // dikirim ulang di sini agar pelanggan tidak menerima pesan ganda.
+
+    return { subscriptionId, activated: true };
+  }
+
+  /**
+   * ISOLIR OTOMATIS ketika invoice overdue melewati grace period — tanpa
+   * menunggu teknisi. Dipanggil oleh IsolirProcessor untuk job "suspend".
+   * Langsung:
+   *   1. disable PPPoE secret di router (kick sesi aktif juga),
+   *   2. set status subscription menjadi suspended,
+   *   3. catat log & kirim notifikasi WhatsApp isolir ke pelanggan.
+   *
+   * Jika router tak terjangkau, error dilempar agar BullMQ me-retry job.
+   * Status subscription hanya diubah setelah router berhasil di-disable
+   * (atau ketika subscription memang tidak tertaut router).
+   */
+  async suspendSubscription(subscriptionId: string, invoiceId?: string, reason?: string) {
+    const subscription = await this.subscriptionsService.findOne(subscriptionId);
+
+    // Sudah suspended -> idempoten, tidak perlu proses ulang.
+    if (subscription.status === "suspended") {
+      this.logger.log(`Subscription ${subscriptionId} sudah suspended, skip isolir`);
+      return { subscriptionId, suspended: true, alreadySuspended: true };
+    }
+
+    if (subscription.routerId && subscription.pppoeUsername) {
+      const success = await this.mikrotikService.suspendPppoe(
+        subscription.routerId,
+        subscription.pppoeUsername,
+      );
+      if (!success) {
+        throw new Error(
+          `Gagal disable PPPoE "${subscription.pppoeUsername}" di router untuk subscription ${subscriptionId}`,
+        );
+      }
+      this.logger.log(`PPPoE "${subscription.pppoeUsername}" di-disable otomatis (isolir tunggakan)`);
+    } else {
+      this.logger.log(
+        `Subscription ${subscriptionId} belum tertaut router; isolir hanya update status di billing`,
+      );
+    }
+
+    await this.subscriptionsService.suspend(subscriptionId);
+    await this.logRepo.save(
+      this.logRepo.create({
+        subscriptionId,
+        action: "suspend",
+        reason: reason || "Isolir otomatis - tunggakan melewati grace period",
+        triggeredBy: "system",
+      }),
+    );
+
+    // Notifikasi pelanggan: layanan diisolir
+    if (invoiceId) {
+      await this.notificationsQueue.add("isolir", {
+        invoiceId,
+        customerId: subscription.customerId,
+      });
+    }
+
+    return { subscriptionId, suspended: true };
+  }
+
   findTasks(status?: string, assignedTo?: string) {
     const where: any = {};
     if (status) where.status = status;

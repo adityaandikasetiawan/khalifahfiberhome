@@ -1,0 +1,16 @@
+HTTrack3.49-2+htsswf+htsjava launched on Thu, 20 Aug 2026 11:51:49 at https://templates.framework-y.com/signflow/pages/about-us-1.html +*.png +*.gif +*.jpg +*.jpeg +*.css +*.js -ad.doubleclick.net/* -mime:application/foobar
+(winhttrack -qwC2%Ps2u1%s%uN0%I0p3DaK0H0%kf2A25000%f#f -F "Mozilla/4.5 (compatible; HTTrack 3.0x; Windows 98)" -%F "<!-- Mirrored from %s%s by HTTrack Website Copier/3.x [XR&CO'2014], %s -->" -%l "en, *" https://templates.framework-y.com/signflow/pages/about-us-1.html -O1 "C:\My Web Sites\signflow" +*.png +*.gif +*.jpg +*.jpeg +*.css +*.js -ad.doubleclick.net/* -mime:application/foobar )
+
+Information, Warnings and Errors reported for this mirror:
+note:	the hts-log.txt file, and hts-cache folder, may contain sensitive information,
+	such as username/password authentication for websites mirrored in this project
+	do not share these files/folders if you want these information to remain private
+
+11:53:36	Error: 	"Not Found" (404) at link https://templates.framework-y.com/signflow/pages/features/components/about.html (from https://templates.framework-y.com/signflow/pages/features/components/content-box.html)
+11:53:36	Error: 	"Not Found" (404) at link https://templates.framework-y.com/signflow/pages/features/containers/www.youtube.com/watch?v=bpqhStV2_rc (from https://templates.framework-y.com/signflow/pages/features/containers/list-grid.html)
+11:53:36	Error: 	"Not Found" (404) at link https://templates.framework-y.com/signflow/pages/features/menus/index.html (from https://templates.framework-y.com/signflow/pages/features/menus/classic-transparent.html)
+11:53:36	Error: 	"Not Found" (404) at link https://templates.framework-y.com/signflow/HTWF/scripts/metismenu.jquery.min.js (from https://templates.framework-y.com/signflow/pages/features/menus/side-lateral.html)
+11:53:36	Error: 	"Not Found" (404) at link https://templates.framework-y.com/signflow/images/bg-3.jpg (from https://templates.framework-y.com/signflow/pages/features/titles/base-1.html)
+
+HTTrack Website Copier/3.49-2 mirror complete in 1 minutes 47 seconds : 356 links scanned, 350 files written (16084293 bytes overall) [16210904 bytes received at 151503 bytes/sec], 33.5 requests per connection
+(5 errors, 0 warnings, 0 messages)

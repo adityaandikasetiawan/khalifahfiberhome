@@ -41,6 +41,9 @@ export class Invoice {
   @Column({ type: "enum", enum: ["draft", "unpaid", "paid", "overdue", "cancelled"], default: "unpaid" })
   status: InvoiceStatus;
 
+  @Column({ name: "pay_token", nullable: true, unique: true, comment: "Token magic-link pembayaran tanpa login" })
+  payToken?: string;
+
   @Column({ type: "timestamp", nullable: true })
   paidAt?: Date;
 

@@ -6,6 +6,8 @@ import { SuspensionLog } from "./entities/suspension-log.entity";
 import { NetworkTask } from "./entities/network-task.entity";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { UsersService } from "../users/users.service";
+import { MikrotikService } from "../mikrotik/mikrotik.service";
+import { getQueueToken } from "@nestjs/bullmq";
 
 describe("IsolirService", () => {
   let service: IsolirService;
@@ -16,8 +18,10 @@ describe("IsolirService", () => {
     save: jest.fn((d) => Promise.resolve({ id: "task-1", ...d })),
     create: jest.fn((d) => d),
   };
-  const mockSubscriptionsService = { suspend: jest.fn(), activate: jest.fn() };
+  const mockSubscriptionsService = { suspend: jest.fn(), activate: jest.fn(), findOne: jest.fn() };
   const mockUsersService = { findById: jest.fn() };
+  const mockMikrotikService = { suspendPppoe: jest.fn(), activatePppoe: jest.fn() };
+  const mockNotificationsQueue = { add: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -28,6 +32,8 @@ describe("IsolirService", () => {
         { provide: getRepositoryToken(NetworkTask), useValue: mockTaskRepo },
         { provide: SubscriptionsService, useValue: mockSubscriptionsService },
         { provide: UsersService, useValue: mockUsersService },
+        { provide: MikrotikService, useValue: mockMikrotikService },
+        { provide: getQueueToken("notifications"), useValue: mockNotificationsQueue },
       ],
     }).compile();
     service = module.get<IsolirService>(IsolirService);
@@ -88,6 +94,7 @@ describe("IsolirService", () => {
   describe("completeTask", () => {
     it("tugas type=suspend -> memanggil subscriptionsService.suspend (BUKAN activate)", async () => {
       mockTaskRepo.findOne.mockResolvedValue({ id: "task-1", type: "suspend", subscriptionId: "sub-1" });
+      mockSubscriptionsService.findOne.mockResolvedValue({ id: "sub-1", customerId: "cust-1" });
       await service.completeTask("task-1", "tech-1");
       expect(mockSubscriptionsService.suspend).toHaveBeenCalledWith("sub-1");
       expect(mockSubscriptionsService.activate).not.toHaveBeenCalled();
@@ -95,6 +102,7 @@ describe("IsolirService", () => {
 
     it("tugas type=activate -> memanggil subscriptionsService.activate (BUKAN suspend)", async () => {
       mockTaskRepo.findOne.mockResolvedValue({ id: "task-2", type: "activate", subscriptionId: "sub-2" });
+      mockSubscriptionsService.findOne.mockResolvedValue({ id: "sub-2", customerId: "cust-2" });
       await service.completeTask("task-2", "tech-1");
       expect(mockSubscriptionsService.activate).toHaveBeenCalledWith("sub-2");
       expect(mockSubscriptionsService.suspend).not.toHaveBeenCalled();
@@ -103,6 +111,95 @@ describe("IsolirService", () => {
     it("melempar NotFoundException kalau task tidak ada", async () => {
       mockTaskRepo.findOne.mockResolvedValue(null);
       await expect(service.completeTask("task-tidak-ada", "tech-1")).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("activateSubscription (aktivasi otomatis setelah bayar)", () => {
+    it("subscription tertaut router -> enable PPPoE lalu set status active", async () => {
+      mockSubscriptionsService.findOne.mockResolvedValue({
+        id: "sub-1",
+        customerId: "cust-1",
+        routerId: "router-1",
+        pppoeUsername: "rumah1",
+      });
+      mockMikrotikService.activatePppoe.mockResolvedValue(true);
+
+      const result = await service.activateSubscription("sub-1", "inv-1");
+
+      expect(mockMikrotikService.activatePppoe).toHaveBeenCalledWith("router-1", "rumah1");
+      expect(mockSubscriptionsService.activate).toHaveBeenCalledWith("sub-1");
+      expect(result).toEqual({ subscriptionId: "sub-1", activated: true });
+    });
+
+    it("MELEMPAR error (agar BullMQ retry) kalau enable PPPoE gagal, dan TIDAK set active", async () => {
+      mockSubscriptionsService.findOne.mockResolvedValue({
+        id: "sub-2",
+        customerId: "cust-2",
+        routerId: "router-1",
+        pppoeUsername: "rumah2",
+      });
+      mockMikrotikService.activatePppoe.mockResolvedValue(false);
+
+      await expect(service.activateSubscription("sub-2", "inv-2")).rejects.toThrow();
+      expect(mockSubscriptionsService.activate).not.toHaveBeenCalled();
+    });
+
+    it("subscription TANPA router -> hanya update status active tanpa panggil MikroTik", async () => {
+      mockSubscriptionsService.findOne.mockResolvedValue({ id: "sub-3", customerId: "cust-3" });
+
+      await service.activateSubscription("sub-3");
+
+      expect(mockMikrotikService.activatePppoe).not.toHaveBeenCalled();
+      expect(mockSubscriptionsService.activate).toHaveBeenCalledWith("sub-3");
+    });
+  });
+
+  describe("suspendSubscription (isolir otomatis tanpa teknisi)", () => {
+    it("subscription aktif tertaut router -> disable PPPoE lalu set status suspended", async () => {
+      mockSubscriptionsService.findOne.mockResolvedValue({
+        id: "sub-1",
+        status: "active",
+        customerId: "cust-1",
+        routerId: "router-1",
+        pppoeUsername: "rumah1",
+      });
+      mockMikrotikService.suspendPppoe.mockResolvedValue(true);
+
+      const result = await service.suspendSubscription("sub-1", "inv-1");
+
+      expect(mockMikrotikService.suspendPppoe).toHaveBeenCalledWith("router-1", "rumah1");
+      expect(mockSubscriptionsService.suspend).toHaveBeenCalledWith("sub-1");
+      expect(result).toMatchObject({ subscriptionId: "sub-1", suspended: true });
+    });
+
+    it("MELEMPAR error (agar BullMQ retry) kalau disable PPPoE gagal, dan TIDAK set suspended", async () => {
+      mockSubscriptionsService.findOne.mockResolvedValue({
+        id: "sub-2",
+        status: "active",
+        customerId: "cust-2",
+        routerId: "router-1",
+        pppoeUsername: "rumah2",
+      });
+      mockMikrotikService.suspendPppoe.mockResolvedValue(false);
+
+      await expect(service.suspendSubscription("sub-2", "inv-2")).rejects.toThrow();
+      expect(mockSubscriptionsService.suspend).not.toHaveBeenCalled();
+    });
+
+    it("IDEMPOTEN: subscription yang sudah suspended tidak diproses ulang", async () => {
+      mockSubscriptionsService.findOne.mockResolvedValue({
+        id: "sub-3",
+        status: "suspended",
+        customerId: "cust-3",
+        routerId: "router-1",
+        pppoeUsername: "rumah3",
+      });
+
+      const result = await service.suspendSubscription("sub-3", "inv-3");
+
+      expect(mockMikrotikService.suspendPppoe).not.toHaveBeenCalled();
+      expect(mockSubscriptionsService.suspend).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ alreadySuspended: true });
     });
   });
 });

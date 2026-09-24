@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { RouterOSClient } from "routeros-client";
 import { Router } from "./entities/router.entity";
+import { CredentialVaultService } from "./credential-vault.service";
 
 /**
  * Abstraksi komunikasi ke RouterOS API.
@@ -11,12 +12,17 @@ import { Router } from "./entities/router.entity";
 export class MikrotikApiService {
   private readonly logger = new Logger(MikrotikApiService.name);
 
+  constructor(private readonly vault: CredentialVaultService) {}
+
   private createClient(router: Router): RouterOSClient {
+    // Dekripsi password hanya di memori proses saat membuat koneksi.
+    // Kredensial plaintext lama tetap kompatibel (decrypt mengembalikan apa adanya).
+    const password = this.vault.decrypt(router.password);
     return new RouterOSClient({
       host: router.host,
       port: router.port,
       user: router.username,
-      password: router.password,
+      password,
       tls: router.useTls ? {} : undefined,
       timeout: 10000,
     });
@@ -225,6 +231,40 @@ export class MikrotikApiService {
   }
 
   /**
+   * Buat profile PPPoE baru di router. Idempoten: kalau nama sudah ada, dianggap sukses.
+   */
+  async createPppoeProfile(
+    router: Router,
+    name: string,
+    rateLimit?: string,
+    localAddress?: string,
+    remoteAddress?: string,
+  ): Promise<boolean> {
+    const client = this.createClient(router);
+    try {
+      const api = await client.connect();
+      const existing = await api.menu("/ppp/profile").where("name", name).getAll();
+      if (existing.length > 0) {
+        await client.close();
+        this.logger.warn(`Profile "${name}" sudah ada di router ${router.name}, skip create`);
+        return true;
+      }
+      const params: any = { name };
+      if (rateLimit) params["rate-limit"] = rateLimit;
+      if (localAddress) params["local-address"] = localAddress;
+      if (remoteAddress) params["remote-address"] = remoteAddress;
+      await api.menu("/ppp/profile").add(params);
+      await client.close();
+      this.logger.log(`Profile "${name}" DIBUAT di router ${router.name} (rate-limit=${rateLimit ?? "-"})`);
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Gagal buat profile ${name} di ${router.name}: ${err.message}`);
+      try { await client.close(); } catch {}
+      return false;
+    }
+  }
+
+  /**
    * Ambil daftar PPPoE profiles yang tersedia di router.
    */
   async getPppoeProfiles(router: Router): Promise<{ name: string; localAddress?: string; remoteAddress?: string; rateLimit?: string }[]> {
@@ -241,6 +281,33 @@ export class MikrotikApiService {
       }));
     } catch (err: any) {
       this.logger.error(`Gagal ambil profiles dari ${router.name}: ${err.message}`);
+      try { await client.close(); } catch {}
+      return [];
+    }
+  }
+
+  /**
+   * Ambil semua PPPoE secret (akun pelanggan) di router.
+   * Dipakai untuk import/sync akun PPPoE ke billing.
+   */
+  async getPppoeSecrets(
+    router: Router,
+  ): Promise<{ name: string; profile: string; disabled: boolean; service: string; comment?: string }[]> {
+    const client = this.createClient(router);
+    try {
+      const api = await client.connect();
+      const secrets = await api.menu("/ppp/secret").getAll();
+      await client.close();
+      return secrets.map((s: any) => ({
+        name: s.name,
+        profile: s.profile,
+        // RouterOS mengembalikan "true"/"false" (string) atau boolean tergantung versi
+        disabled: s.disabled === true || s.disabled === "true" || s.disabled === "yes",
+        service: s.service,
+        comment: s.comment,
+      }));
+    } catch (err: any) {
+      this.logger.error(`Gagal ambil PPPoE secrets dari ${router.name}: ${err.message}`);
       try { await client.close(); } catch {}
       return [];
     }

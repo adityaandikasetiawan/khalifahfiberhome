@@ -24,6 +24,11 @@ export interface IpaymuPaymentResponse {
     PaymentName?: string;
     Expired?: string;
     Total?: number;
+    SubTotal?: number;
+    Fee?: number;
+    QrString?: string;
+    QrImage?: string;
+    QrTemplate?: string;
   };
   Message?: string;
 }
@@ -146,6 +151,52 @@ export class IpaymuProvider {
 
     this.logger.log(`[iPaymu] Payment created successfully: ${JSON.stringify(result.Data)}`);
     return result;
+  }
+
+  /**
+   * Cek status transaksi ke iPaymu berdasarkan transactionId.
+   * Dipakai sebagai fallback kalau webhook telat/tidak masuk.
+   * Endpoint: POST /transaction  body { transactionId }
+   */
+  async checkTransaction(transactionId: string | number): Promise<{
+    status: "success" | "pending" | "failed";
+    raw: any;
+  }> {
+    const body: Record<string, any> = { transactionId: Number(transactionId) };
+    const jsonBody = JSON.stringify(body);
+    const signature = this.generateSignature(jsonBody);
+    const timestamp = this.generateTimestamp();
+    const url = `${this.baseUrl}/transaction`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        va: this.va,
+        signature,
+        timestamp,
+      },
+      body: jsonBody,
+    });
+
+    const result: any = await response.json();
+    this.logger.log(`[iPaymu] Check transaction ${transactionId}: ${JSON.stringify(result?.Data?.StatusDesc ?? result?.Message)}`);
+
+    // iPaymu status: 1=berhasil, 0=pending, -2/-3=expired/gagal
+    // Field: Data.Status (angka) atau Data.StatusDesc ("berhasil"/"pending"/"expired")
+    const data = result?.Data ?? {};
+    const statusCode = Number(data.Status ?? data.StatusCode ?? 0);
+    const statusDesc = String(data.StatusDesc ?? "").toLowerCase();
+
+    let status: "success" | "pending" | "failed" = "pending";
+    if (statusCode === 1 || statusDesc === "berhasil" || statusDesc === "success") {
+      status = "success";
+    } else if (statusCode < 0 || statusDesc === "expired" || statusDesc === "gagal") {
+      status = "failed";
+    }
+
+    return { status, raw: result };
   }
 
   /**

@@ -3,6 +3,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Package } from "./entities/package.entity";
 import { CreatePackageDto } from "./dto/create-package.dto";
+import { UpdatePackageDto } from "./dto/update-package.dto";
 
 @Injectable()
 export class PackagesService {
@@ -12,6 +13,12 @@ export class PackagesService {
 
   create(dto: CreatePackageDto) {
     const pkg = this.repo.create(dto);
+    return this.repo.save(pkg);
+  }
+
+  async update(id: string, dto: UpdatePackageDto) {
+    const pkg = await this.findOne(id);
+    Object.assign(pkg, dto);
     return this.repo.save(pkg);
   }
 

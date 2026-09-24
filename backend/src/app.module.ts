@@ -25,6 +25,8 @@ import { PortalModule } from './modules/portal/portal.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { OdpModule } from './modules/odp/odp.module';
 import { BroadcastModule } from './modules/broadcast/broadcast.module';
+import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
+import { RegistrationModule } from './modules/registration/registration.module';
 
 @Module({
   imports: [
@@ -83,6 +85,8 @@ import { BroadcastModule } from './modules/broadcast/broadcast.module';
     TicketsModule,
     OdpModule,
     BroadcastModule,
+    SiteSettingsModule,
+    RegistrationModule,
   ],
   providers: [
     {

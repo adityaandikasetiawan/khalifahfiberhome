@@ -8,6 +8,16 @@ export const metadata: Metadata = {
   title: "Khalifah Fiber Home - Internet Cepat & Stabil",
   description: "Layanan internet fiber optic cepat, stabil, dan terjangkau untuk rumah Anda. Khalifah Fiber Home.",
   keywords: "internet, fiber optic, ISP, wifi rumah, internet murah, khalifah fiber",
+  icons: {
+    icon: "/favicon.ico?v=2",
+    shortcut: "/favicon.ico?v=2",
+    apple: "/logo.png?v=2",
+  },
+  openGraph: {
+    title: "Khalifah Fiber Home - Internet Cepat & Stabil",
+    description: "Layanan internet fiber optic cepat, stabil, dan terjangkau untuk rumah Anda.",
+    images: ["/logo.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

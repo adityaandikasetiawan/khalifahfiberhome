@@ -4,6 +4,7 @@ import { Throttle } from "@nestjs/throttler";
 import { PortalAuthService } from "./portal-auth.service";
 import { RequestOtpDto } from "./dto/request-otp.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
+import { LoginPasswordDto, RequestResetDto, SetPasswordDto } from "./dto/login-password.dto";
 
 @ApiTags("portal-auth")
 @Controller("portal/auth")
@@ -24,5 +25,29 @@ export class PortalAuthController {
   @ApiOperation({ summary: "Verifikasi kode OTP, mengembalikan JWT khusus portal pelanggan" })
   verifyOtp(@Body() dto: VerifyOtpDto) {
     return this.service.verifyOtp(dto.phone, dto.otp);
+  }
+
+  @Post("login")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: "Login portal via email + password" })
+  login(@Body() dto: LoginPasswordDto) {
+    return this.service.loginWithPassword(dto.email, dto.password);
+  }
+
+  @Post("request-password-reset")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: "Minta tautan atur/reset password dikirim ke email" })
+  requestReset(@Body() dto: RequestResetDto) {
+    return this.service.requestPasswordReset(dto.email);
+  }
+
+  @Post("set-password")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: "Set/reset password via token" })
+  setPassword(@Body() dto: SetPasswordDto) {
+    return this.service.setPasswordWithToken(dto.token, dto.password);
   }
 }

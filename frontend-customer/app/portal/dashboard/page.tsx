@@ -13,10 +13,13 @@ interface Profile {
   phone: string;
   package?: {
     name: string;
-    speed: number;
+    desc?: string;
   };
   packageName?: string;
-  speed?: number;
+  packageDesc?: string;
+  activeUntil?: string | null;
+  daysRemaining?: number | null;
+  subscriptionStatus?: string | null;
 }
 
 interface Invoice {
@@ -73,7 +76,10 @@ export default function PortalDashboardPage() {
   );
 
   const packageName = profile?.package?.name ?? profile?.packageName ?? "-";
-  const speed = profile?.package?.speed ?? profile?.speed ?? 0;
+  const packageDesc = profile?.package?.desc ?? profile?.packageDesc ?? "Cocok untuk beberapa perangkat";
+  const activeUntil = profile?.activeUntil ?? null;
+  const daysRemaining = profile?.daysRemaining ?? null;
+  const subStatus = profile?.subscriptionStatus ?? null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -111,8 +117,42 @@ export default function PortalDashboardPage() {
               <p className="font-semibold">{packageName}</p>
             </div>
             <div className="ml-auto text-right">
-              <p className="text-sm text-muted-foreground">Kecepatan</p>
-              <p className="font-semibold text-primary">{speed} Mbps</p>
+              <p className="text-sm text-muted-foreground">Paket</p>
+              <p className="font-semibold text-primary">{packageDesc}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-4 border-t pt-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Status Layanan</p>
+              {subStatus === "suspended" ? (
+                <p className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                  Terisolir
+                </p>
+              ) : subStatus === "active" ? (
+                <p className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                  Aktif
+                </p>
+              ) : (
+                <p className="mt-0.5 text-sm font-medium text-muted-foreground">-</p>
+              )}
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">Aktif Sampai</p>
+              {activeUntil ? (
+                <>
+                  <p className="mt-0.5 text-sm font-semibold">
+                    {new Date(activeUntil).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
+                  </p>
+                  {daysRemaining !== null && (
+                    <p className={`text-xs ${daysRemaining <= 3 ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+                      {daysRemaining > 0 ? `${daysRemaining} hari lagi` : "Sudah lewat masa aktif"}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-0.5 text-sm font-medium text-muted-foreground">Belum ada pembayaran</p>
+              )}
             </div>
           </div>
         </div>

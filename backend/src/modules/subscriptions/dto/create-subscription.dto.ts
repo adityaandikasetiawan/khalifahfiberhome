@@ -30,6 +30,11 @@ export class CreateSubscriptionDto {
   @IsString()
   pppoeUsername?: string;
 
+  @ApiPropertyOptional({ description: "Password PPPoE (untuk membuat akun baru di router)" })
+  @IsOptional()
+  @IsString()
+  pppoePassword?: string;
+
   @ApiPropertyOptional({ description: "ID router MikroTik yang mengelola koneksi ini" })
   @IsOptional()
   @IsUUID()

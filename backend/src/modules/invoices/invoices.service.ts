@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import * as crypto from "crypto";
 import { Invoice } from "./entities/invoice.entity";
 import { InvoiceItem } from "./entities/invoice-item.entity";
 import { CreateInvoiceDto } from "./dto/create-invoice.dto";
@@ -23,6 +24,23 @@ export class InvoicesService {
     return `INV-${y}${m}-${rand}`;
   }
 
+  /** Token acak untuk magic-link pembayaran tanpa login. */
+  private generatePayToken(): string {
+    return crypto.randomBytes(24).toString("hex");
+  }
+
+  /**
+   * Pastikan invoice punya payToken. Untuk invoice lama yang dibuat sebelum
+   * fitur ini ada, token dibuat on-demand lalu disimpan.
+   */
+  async ensurePayToken(invoice: Invoice): Promise<string> {
+    if (invoice.payToken) return invoice.payToken;
+    const token = this.generatePayToken();
+    await this.invoiceRepo.update(invoice.id, { payToken: token });
+    invoice.payToken = token;
+    return token;
+  }
+
   /**
    * Membuat invoice manual (mis. biaya instalasi/tambahan di luar siklus bulanan).
    */
@@ -35,6 +53,25 @@ export class InvoicesService {
     const dueDate = new Date(now);
     dueDate.setDate(dueDate.getDate() + 7);
 
+    // Masa aktif invoice = 1 bulan penuh.
+    // Jika pelanggan sudah punya masa aktif berjalan (invoice lunas terakhir),
+    // periode baru menyambung dari situ; jika belum, mulai dari hari ini.
+    const lastPaid = await this.invoiceRepo.findOne({
+      where: { subscriptionId: subscription.id, status: "paid" as any },
+      order: { periodEnd: "DESC" },
+    });
+
+    let periodStart: Date;
+    if (lastPaid?.periodEnd && new Date(lastPaid.periodEnd) >= now) {
+      periodStart = new Date(lastPaid.periodEnd);
+      periodStart.setDate(periodStart.getDate() + 1);
+    } else {
+      periodStart = new Date(now);
+    }
+    const periodEnd = new Date(periodStart);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+
     const items = dto.items.map((i) =>
       this.itemRepo.create({ ...i, subtotal: i.qty * i.unitPrice }),
     );
@@ -42,9 +79,10 @@ export class InvoicesService {
 
     const invoice = this.invoiceRepo.create({
       invoiceNumber: this.generateInvoiceNumber(now),
+      payToken: this.generatePayToken(),
       subscriptionId: subscription.id,
-      periodStart: now,
-      periodEnd: now,
+      periodStart,
+      periodEnd,
       amount,
       taxAmount: 0,
       totalAmount: amount,
@@ -66,6 +104,7 @@ export class InvoicesService {
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const dueDate = new Date(now);
+    dueDate.setDate(dueDate.getDate() + 7); // jatuh tempo 7 hari
 
     const item = this.itemRepo.create({
       description: `Langganan ${subscription.package.name} - ${periodStart.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`,
@@ -76,6 +115,7 @@ export class InvoicesService {
 
     const invoice = this.invoiceRepo.create({
       invoiceNumber: this.generateInvoiceNumber(now),
+      payToken: this.generatePayToken(),
       subscriptionId: subscription.id,
       periodStart,
       periodEnd,
@@ -89,6 +129,64 @@ export class InvoicesService {
 
     const saved = await this.invoiceRepo.save(invoice);
     this.logger.log(`Invoice ${saved.invoiceNumber} dibuat untuk subscription ${subscription.id}`);
+    return saved;
+  }
+
+  /**
+   * Hitung "masa aktif" subscription = periodEnd dari invoice LUNAS terakhir.
+   * Kalau belum ada invoice lunas, kembalikan null (belum aktif berbayar).
+   */
+  async getActiveUntil(subscriptionId: string): Promise<Date | null> {
+    const paid = await this.invoiceRepo.findOne({
+      where: { subscriptionId, status: "paid" as any },
+      order: { periodEnd: "DESC" },
+    });
+    return paid?.periodEnd ? new Date(paid.periodEnd) : null;
+  }
+
+  /**
+   * Generate invoice perpanjangan untuk periode tertentu (1 bulan setelah
+   * masa aktif berjalan). Dipakai oleh cron renewal H-3.
+   * Idempotent: tidak akan membuat invoice ganda untuk periode yang sama.
+   */
+  async generateRenewalInvoice(subscription: Subscription, periodStart: Date, periodEnd: Date): Promise<Invoice | null> {
+    // Cek apakah sudah ada invoice untuk periode ini (hindari dobel)
+    const existing = await this.invoiceRepo
+      .createQueryBuilder("invoice")
+      .where("invoice.subscriptionId = :sid", { sid: subscription.id })
+      .andWhere("CAST(invoice.periodStart AS DATE) = :ps", { ps: periodStart.toISOString().split("T")[0] })
+      .getOne();
+    if (existing) return null;
+
+    const now = new Date();
+    // Jatuh tempo = hari terakhir masa aktif berjalan (sehari sebelum periode baru
+    // mulai). Dengan begitu tenggang isolir (ISOLIR_GRACE_DAYS, default 2 hari)
+    // dihitung dari saat masa aktif BERAKHIR, bukan dari tanggal invoice terbit.
+    const dueDate = new Date(periodStart);
+    dueDate.setDate(dueDate.getDate() - 1);
+
+    const item = this.itemRepo.create({
+      description: `Langganan ${subscription.package.name} - ${periodStart.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`,
+      qty: 1,
+      unitPrice: subscription.package.price,
+      subtotal: subscription.package.price,
+    });
+
+    const invoice = this.invoiceRepo.create({
+      invoiceNumber: this.generateInvoiceNumber(now),
+      payToken: this.generatePayToken(),
+      subscriptionId: subscription.id,
+      periodStart,
+      periodEnd,
+      amount: subscription.package.price,
+      taxAmount: 0,
+      totalAmount: subscription.package.price,
+      dueDate,
+      status: "unpaid",
+      items: [item],
+    });
+    const saved = await this.invoiceRepo.save(invoice);
+    this.logger.log(`Invoice perpanjangan ${saved.invoiceNumber} dibuat untuk subscription ${subscription.id} (periode ${periodStart.toISOString().split("T")[0]} s/d ${periodEnd.toISOString().split("T")[0]}, jatuh tempo ${dueDate.toISOString().split("T")[0]})`);
     return saved;
   }
 
@@ -123,7 +221,11 @@ export class InvoicesService {
     return this.invoiceRepo.save(invoice);
   }
 
-  // Digunakan oleh isolir scheduler untuk mencari tagihan yang sudah lewat jatuh tempo
+  // Digunakan oleh isolir scheduler untuk mencari tagihan yang sudah lewat jatuh
+  // tempo melewati grace period. Menyertakan status "unpaid" DAN "overdue" karena
+  // cron markOverdueInvoices (jam 1 pagi) mengubah invoice lewat tempo menjadi
+  // "overdue" sebelum scheduler isolir (jam 2 pagi) berjalan — kalau hanya cari
+  // "unpaid", invoice yang sudah "overdue" tidak akan pernah terisolir.
   async findOverdue(graceDays: number) {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - graceDays);
@@ -131,7 +233,7 @@ export class InvoicesService {
     return this.invoiceRepo
       .createQueryBuilder("invoice")
       .leftJoinAndSelect("invoice.subscription", "subscription")
-      .where("invoice.status = :status", { status: "unpaid" })
+      .where("invoice.status IN (:...statuses)", { statuses: ["unpaid", "overdue"] })
       .andWhere("invoice.dueDate <= :cutoff", { cutoff })
       .getMany();
   }

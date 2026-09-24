@@ -2,9 +2,10 @@ import { IsEmail, IsOptional, IsString, IsDateString } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 export class CreateCustomerDto {
-  @ApiProperty({ example: "CUST-00123" })
+  @ApiPropertyOptional({ example: "CUST-00123", description: "Opsional. Jika kosong, akan di-generate otomatis (CUST-XXXXX)." })
+  @IsOptional()
   @IsString()
-  customerNumber: string;
+  customerNumber?: string;
 
   @ApiProperty({ example: "Budi Santoso" })
   @IsString()

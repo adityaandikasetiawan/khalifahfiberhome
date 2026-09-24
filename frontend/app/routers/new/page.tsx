@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -77,7 +78,7 @@ export default function NewRouterPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password API</Label>
-                <Input id="password" type="password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                <PasswordInput id="password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
               </div>
             </div>
 

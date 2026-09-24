@@ -34,7 +34,7 @@ export default function KontakPage() {
             {/* Contact Info */}
             <div className="lg:col-span-2 space-y-4">
               <Link
-                href="https://wa.me/6281234567890?text=Halo%20Khalifah%20Fiber%20Home"
+                href="https://wa.me/6282128052229?text=Halo%20Khalifah%20Fiber%20Home"
                 target="_blank"
                 className="flex items-start gap-4 rounded-2xl border bg-card p-5 hover:border-primary/20 hover:shadow-md transition-all"
               >
@@ -43,7 +43,7 @@ export default function KontakPage() {
                 </div>
                 <div>
                   <p className="font-semibold text-sm">WhatsApp</p>
-                  <p className="text-sm text-muted-foreground">0812-3456-7890</p>
+                  <p className="text-sm text-muted-foreground">0821-2805-2229</p>
                   <p className="text-xs text-green-600 mt-1">Respon cepat, chat sekarang →</p>
                 </div>
               </Link>
@@ -54,7 +54,7 @@ export default function KontakPage() {
                 </div>
                 <div>
                   <p className="font-semibold text-sm">Telepon</p>
-                  <p className="text-sm text-muted-foreground">0812-3456-7890</p>
+                  <p className="text-sm text-muted-foreground">0821-2805-2229</p>
                   <p className="text-xs text-muted-foreground mt-1">Senin - Sabtu, 08:00 - 21:00</p>
                 </div>
               </div>
@@ -75,7 +75,7 @@ export default function KontakPage() {
                 </div>
                 <div>
                   <p className="font-semibold text-sm">Kantor</p>
-                  <p className="text-sm text-muted-foreground">Jl. Fiber Optic No. 1, Indonesia</p>
+                  <p className="text-sm text-muted-foreground">Jl. RTA Milono KM. 8 Komplek Asabru 1 No. 6 RT 003/002, Kel. Kereng Bangkirai, Kec. Sabangau, Kota Palangkaraya, Kalimantan Tengah 73111</p>
                 </div>
               </div>
             </div>

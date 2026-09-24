@@ -75,22 +75,29 @@ export class PaymentsService {
           customerPhone: invoice.subscription?.customer?.phone,
           customerEmail: invoice.subscription?.customer?.email,
           paymentMethod: dto.paymentMethod as "va" | "qris" | "ewallet",
+          paymentChannel: dto.paymentChannel,
           notifyUrl,
           returnUrl,
         });
 
         saved.gatewayReference = orderId;
+        saved.rawPayload = { transactionId: gatewayResponse.Data?.TransactionId };
         await this.repo.save(saved);
 
         return {
           payment: saved,
           gateway: {
-            url: gatewayResponse.Url,
+            url: gatewayResponse.Url ?? (gatewayResponse.Data as any)?.Url,
             paymentNo: gatewayResponse.Data?.PaymentNo,
             paymentName: gatewayResponse.Data?.PaymentName,
             expired: gatewayResponse.Data?.Expired,
             total: gatewayResponse.Data?.Total,
+            subTotal: gatewayResponse.Data?.SubTotal,
+            fee: gatewayResponse.Data?.Fee,
             transactionId: gatewayResponse.Data?.TransactionId,
+            qrString: gatewayResponse.Data?.QrString,
+            qrImage: gatewayResponse.Data?.QrImage,
+            paymentMethod: dto.paymentMethod,
           },
         };
       } else {
@@ -156,13 +163,96 @@ export class PaymentsService {
         customerId: invoice.subscription?.customer?.id,
       });
 
-      // Jika subscription sedang suspended karena tunggakan, trigger tugas aktivasi
-      if (invoice.subscription?.status === "suspended") {
-        await this.isolirQueue.add("activate", { subscriptionId: invoice.subscriptionId });
+      const subscription = invoice.subscription;
+      const customer = subscription?.customer;
+
+      // PEMBAYARAN REGISTRASI PELANGGAN BARU:
+      // Jika ini pembayaran pertama registrasi (subscription pending_activation),
+      // JANGAN aktifkan router. Set status menjadi "menunggu approval teknisi"
+      // (customer=pending_active). PPPoE baru dibuat & di-enable saat teknisi
+      // meng-approve lewat endpoint approval.
+      if (subscription?.status === "pending_activation") {
+        await this.markPendingActivation(subscription.id, customer?.id);
+        this.logger.log(
+          `Pembayaran registrasi pelanggan baru (sub ${subscription.id}) diterima -> menunggu approval teknisi`,
+        );
+      } else if (subscription?.status === "suspended") {
+        // PELANGGAN LAMA yang tersuspend karena tunggakan -> aktivasi OTOMATIS
+        // ke router (enable PPPoE) via queue isolir. Retry ditangani BullMQ.
+        await this.isolirQueue.add(
+          "activate",
+          { subscriptionId: invoice.subscriptionId, invoiceId: invoice.id },
+          { attempts: 5, backoff: { type: "exponential", delay: 30000 } },
+        );
       }
     }
 
     return saved;
+  }
+
+  /**
+   * Tandai pelanggan baru sebagai "menunggu approval teknisi" setelah membayar
+   * biaya registrasi. Subscription tetap pending_activation (belum active),
+   * customer -> pending_active. PPPoE TIDAK dibuat/di-enable di sini; itu
+   * dilakukan saat teknisi meng-approve.
+   */
+  private async markPendingActivation(subscriptionId: string, customerId?: string) {
+    const mgr = this.repo.manager;
+    if (customerId) {
+      await mgr.query(`UPDATE customers SET status = 'pending_active' WHERE id = $1`, [customerId]);
+    }
+    // subscription dibiarkan pending_activation sampai teknisi approve.
+    void subscriptionId;
+  }
+
+  /**
+   * Cek status pembayaran terkini ke iPaymu (fallback kalau webhook belum masuk).
+   * Ambil payment pending terbaru untuk invoice, tanya statusnya ke iPaymu,
+   * lalu proses lewat handleWebhook yang sama (idempoten) kalau sudah sukses.
+   */
+  async checkPaymentStatus(invoiceId: string) {
+    const invoice = await this.invoicesService.findOne(invoiceId);
+    if (invoice.status === "paid") {
+      return { status: "paid", message: "Invoice sudah lunas" };
+    }
+
+    // Ambil payment pending terbaru yang punya transactionId
+    const payments = await this.repo.find({
+      where: { invoiceId },
+      order: { createdAt: "DESC" },
+    });
+    const pending = payments.find((p) => p.status === "pending" && p.rawPayload?.transactionId);
+
+    if (!pending || !pending.rawPayload?.transactionId) {
+      return { status: invoice.status, message: "Belum ada transaksi pembayaran yang bisa dicek" };
+    }
+
+    if (this.config.get("PAYMENT_PROVIDER") !== "ipaymu") {
+      return { status: invoice.status, message: "Cek status hanya tersedia untuk iPaymu" };
+    }
+
+    try {
+      const result = await this.ipaymuProvider.checkTransaction(pending.rawPayload.transactionId);
+      if (result.status === "success") {
+        // Proses lewat jalur webhook yang sama (idempoten)
+        await this.handleWebhook({
+          gatewayReference: pending.gatewayReference!,
+          status: "success",
+          rawPayload: { ...pending.rawPayload, checkedManually: true, ipaymuResponse: result.raw },
+        });
+        return { status: "paid", message: "Pembayaran terkonfirmasi. Invoice lunas." };
+      }
+      return {
+        status: result.status,
+        message:
+          result.status === "pending"
+            ? "Pembayaran belum diterima. Jika sudah bayar, tunggu beberapa menit lalu cek lagi."
+            : "Transaksi kedaluwarsa atau gagal. Silakan buat pembayaran baru.",
+      };
+    } catch (err) {
+      this.logger.error(`Gagal cek status pembayaran invoice ${invoiceId}`, err as Error);
+      return { status: invoice.status, message: "Gagal menghubungi payment gateway. Coba lagi nanti." };
+    }
   }
 
   findByInvoice(invoiceId: string) {

@@ -3,12 +3,15 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { InvoicesService } from "../invoices/invoices.service";
-import { IsolirService } from "./isolir.service";
 
 /**
  * Cron job harian: cek invoice yang sudah overdue melewati grace period
- * (default 3 hari, lihat env ISOLIR_GRACE_DAYS) dan buat tugas isolir
- * untuk teknisi, plus notifikasi ke pelanggan.
+ * (default 3 hari, lihat env ISOLIR_GRACE_DAYS) dan ISOLIR OTOMATIS pelanggan
+ * yang menunggak — langsung disable PPPoE di router tanpa menunggu teknisi.
+ *
+ * Setiap invoice overdue di-enqueue sebagai job "suspend" ke queue "isolir"
+ * (dengan retry BullMQ). Processor (IsolirProcessor) akan men-disable PPPoE,
+ * mengubah status subscription menjadi suspended, dan mengirim notifikasi.
  */
 @Injectable()
 export class IsolirSchedulerJob {
@@ -16,8 +19,7 @@ export class IsolirSchedulerJob {
 
   constructor(
     private readonly invoicesService: InvoicesService,
-    private readonly isolirService: IsolirService,
-    @InjectQueue("notifications") private readonly notificationsQueue: Queue,
+    @InjectQueue("isolir") private readonly isolirQueue: Queue,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
@@ -28,15 +30,21 @@ export class IsolirSchedulerJob {
     this.logger.log(`${overdueInvoices.length} invoice overdue melewati grace period ${graceDays} hari`);
 
     for (const invoice of overdueInvoices) {
-      await this.isolirService.createSuspendTask(
-        invoice.subscriptionId,
-        invoice.id,
-        `Invoice ${invoice.invoiceNumber} belum dibayar setelah ${graceDays} hari jatuh tempo`,
+      // Enqueue isolir otomatis (retry ditangani BullMQ). jobId dedup per
+      // subscription agar tidak menumpuk job ganda dalam satu hari.
+      await this.isolirQueue.add(
+        "suspend",
+        {
+          subscriptionId: invoice.subscriptionId,
+          invoiceId: invoice.id,
+          reason: `Invoice ${invoice.invoiceNumber} belum dibayar setelah ${graceDays} hari jatuh tempo`,
+        },
+        {
+          jobId: `suspend:${invoice.subscriptionId}`,
+          attempts: 5,
+          backoff: { type: "exponential", delay: 30000 },
+        },
       );
-      await this.notificationsQueue.add("isolir", {
-        invoiceId: invoice.id,
-        customerId: invoice.subscription?.customerId,
-      });
     }
   }
 }

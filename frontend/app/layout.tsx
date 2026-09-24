@@ -5,8 +5,13 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "ISP Billing System",
+  title: "Khalifah Fiber Home - Admin Panel",
   description: "Sistem penagihan dan pembayaran pelanggan internet",
+  icons: {
+    icon: "/favicon.ico?v=2",
+    shortcut: "/favicon.ico?v=2",
+    apple: "/logo.png?v=2",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

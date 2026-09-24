@@ -16,10 +16,10 @@ interface Profile {
   installDate?: string;
   package?: {
     name: string;
-    speed: number;
+    desc?: string;
   };
   packageName?: string;
-  speed?: number;
+  packageDesc?: string;
 }
 
 export default function PortalProfilPage() {
@@ -56,14 +56,14 @@ export default function PortalProfilPage() {
   if (!profile) return null;
 
   const packageName = profile.package?.name ?? profile.packageName ?? "-";
-  const speed = profile.package?.speed ?? profile.speed ?? 0;
+  const packageDesc = profile.package?.desc ?? profile.packageDesc ?? "Cocok untuk beberapa perangkat";
 
   const infoItems = [
     { icon: User, label: "Nama", value: profile.name },
     { icon: Hash, label: "Nomor Pelanggan", value: profile.customerNumber },
     { icon: Phone, label: "No. HP", value: profile.phone },
     { icon: MapPin, label: "Alamat", value: profile.address ?? "-" },
-    { icon: Wifi, label: "Paket", value: `${packageName} (${speed} Mbps)` },
+    { icon: Wifi, label: "Paket", value: `${packageName} — ${packageDesc}` },
     {
       icon: Calendar,
       label: "Tanggal Pasang",

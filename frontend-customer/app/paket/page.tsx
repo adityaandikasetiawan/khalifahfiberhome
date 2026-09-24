@@ -10,29 +10,29 @@ import { api } from "@/lib/api";
 interface Pkg {
   id: string;
   name: string;
-  speedMbps: number;
+  displayDesc?: string;
   price: number;
   billingCycle: string;
-  isActive: boolean;
+  isActive?: boolean;
 }
 
 const CYCLE_LABEL: Record<string, string> = { monthly: "bulan", quarterly: "3 bulan", yearly: "tahun" };
 
 const FALLBACK_PACKAGES: Pkg[] = [
-  { id: "1", name: "Home 10", speedMbps: 10, price: 150000, billingCycle: "monthly", isActive: true },
-  { id: "2", name: "Home 20", speedMbps: 20, price: 250000, billingCycle: "monthly", isActive: true },
-  { id: "3", name: "Home 30", speedMbps: 30, price: 300000, billingCycle: "monthly", isActive: true },
-  { id: "4", name: "Home 50", speedMbps: 50, price: 400000, billingCycle: "monthly", isActive: true },
-  { id: "5", name: "Home 100", speedMbps: 100, price: 600000, billingCycle: "monthly", isActive: true },
+  { id: "1", name: "Home Basic", displayDesc: "Cocok untuk 1-2 perangkat", price: 150000, billingCycle: "monthly" },
+  { id: "2", name: "Home Plus", displayDesc: "Cocok untuk beberapa perangkat", price: 250000, billingCycle: "monthly" },
+  { id: "3", name: "Home Pro", displayDesc: "Cocok untuk banyak perangkat", price: 300000, billingCycle: "monthly" },
+  { id: "4", name: "Home Max", displayDesc: "Cocok untuk keluarga & WFH", price: 400000, billingCycle: "monthly" },
 ];
 
 export default function PaketPage() {
   const [packages, setPackages] = useState<Pkg[]>(FALLBACK_PACKAGES);
 
   useEffect(() => {
-    api.get("/packages").then((res) => {
+    // Endpoint publik: mengembalikan kecepatan "display" (up to), bukan rate-limit asli.
+    api.get("/registrations/packages").then((res) => {
       if (res.data.data?.length > 0) {
-        setPackages(res.data.data.filter((p: Pkg) => p.isActive));
+        setPackages(res.data.data);
       }
     }).catch(() => {});
   }, []);
@@ -75,24 +75,20 @@ export default function PaketPage() {
                   )}
                   <div className="text-center mb-6">
                     <h3 className="text-xl font-bold">{pkg.name}</h3>
-                    <p className="text-sm text-muted-foreground">{pkg.speedMbps} Mbps Dedicated</p>
+                    <p className="text-sm text-muted-foreground">{pkg.displayDesc ?? "Cocok untuk beberapa perangkat"}</p>
                   </div>
                   <div className="text-center mb-6">
                     <span className="text-4xl font-bold">Rp {Number(pkg.price).toLocaleString("id-ID")}</span>
                     <span className="text-muted-foreground"> / {CYCLE_LABEL[pkg.billingCycle] ?? pkg.billingCycle}</span>
                   </div>
                   <ul className="space-y-3 mb-6">
-                    <li className="flex items-center gap-2 text-sm"><CheckCircle className="h-4 w-4 text-primary" /> {pkg.speedMbps} Mbps Dedicated</li>
+                    <li className="flex items-center gap-2 text-sm"><CheckCircle className="h-4 w-4 text-primary" /> {pkg.displayDesc ?? "Cocok untuk beberapa perangkat"}</li>
                     <li className="flex items-center gap-2 text-sm"><CheckCircle className="h-4 w-4 text-primary" /> Tanpa FUP</li>
                     <li className="flex items-center gap-2 text-sm"><CheckCircle className="h-4 w-4 text-primary" /> Free Router WiFi</li>
                     <li className="flex items-center gap-2 text-sm"><CheckCircle className="h-4 w-4 text-primary" /> Support 24/7</li>
-                    {pkg.speedMbps >= 50 && (
-                      <li className="flex items-center gap-2 text-sm"><CheckCircle className="h-4 w-4 text-primary" /> Priority Support</li>
-                    )}
                   </ul>
                   <Link
-                    href={`https://wa.me/6281234567890?text=Halo,%20saya%20tertarik%20paket%20${encodeURIComponent(pkg.name)}%20${pkg.speedMbps}Mbps`}
-                    target="_blank"
+                    href={`/daftar?paket=${encodeURIComponent(pkg.name)}`}
                     className={`block w-full rounded-lg py-3 text-center text-sm font-semibold transition-all ${
                       isMiddle
                         ? "bg-primary text-primary-foreground hover:bg-primary/90"

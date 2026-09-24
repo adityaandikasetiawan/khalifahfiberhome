@@ -22,9 +22,17 @@ export class IsolirProcessor extends WorkerHost {
 
   async process(job: Job): Promise<void> {
     if (job.name === "activate") {
-      const { subscriptionId } = job.data;
-      await this.isolirService.createActivateTask(subscriptionId);
-      this.logger.log(`Tugas aktivasi dibuat untuk subscription ${subscriptionId} (dari job queue)`);
+      const { subscriptionId, invoiceId } = job.data;
+      // AKTIVASI OTOMATIS: langsung enable PPPoE di router + update status,
+      // tanpa menunggu teknisi. Jika router gagal, error dilempar -> BullMQ retry.
+      await this.isolirService.activateSubscription(subscriptionId, invoiceId);
+      this.logger.log(`Subscription ${subscriptionId} diaktivasi otomatis (pembayaran lunas)`);
+    } else if (job.name === "suspend") {
+      const { subscriptionId, invoiceId, reason } = job.data;
+      // ISOLIR OTOMATIS: langsung disable PPPoE di router + update status,
+      // tanpa menunggu teknisi. Jika router gagal, error dilempar -> BullMQ retry.
+      await this.isolirService.suspendSubscription(subscriptionId, invoiceId, reason);
+      this.logger.log(`Subscription ${subscriptionId} diisolir otomatis (tunggakan overdue)`);
     }
   }
 }
