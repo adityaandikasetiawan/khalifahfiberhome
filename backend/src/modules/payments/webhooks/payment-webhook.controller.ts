@@ -80,7 +80,7 @@ export class PaymentWebhookController {
   @HttpCode(HttpStatus.OK)
   @ApiExcludeEndpoint()
   async handleIpaymuWebhook(@Body() payload: any) {
-    const result = this.ipaymuProvider.verifyCallback(payload);
+    const result = await this.ipaymuProvider.verifyCallback(payload);
 
     if (!result.isValid || !result.orderId) {
       throw new UnauthorizedException("Invalid iPaymu callback payload");

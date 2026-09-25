@@ -206,22 +206,34 @@ export class IpaymuProvider {
    *
    * Untuk verifikasi, kita check status_code dan cocokkan reference_id.
    */
-  verifyCallback(payload: any): { isValid: boolean; orderId: string; status: "success" | "failed" } {
+  async verifyCallback(payload: any): Promise<{ isValid: boolean; orderId: string; status: "success" | "failed" }> {
     // iPaymu callback fields:
-    // trx_id, reference_id (our orderId), via, channel, status_code (1=berhasil, -1=expired)
-    // status: berhasil / expired / pending
+    // trx_id (id transaksi iPaymu), reference_id (orderId kita), status_code (1=berhasil)
+    //
+    // KEAMANAN: payload callback TIDAK dipercaya begitu saja (bisa dipalsukan oleh
+    // siapa pun yang menebak reference_id). Status "success" HANYA ditetapkan setelah
+    // dikonfirmasi ulang server-to-server ke iPaymu via checkTransaction (signature HMAC).
     const orderId = payload.reference_id || payload.referenceId || "";
-    const statusCode = parseInt(payload.status_code ?? payload.StatusCode ?? "0", 10);
+    const trxId = payload.trx_id || payload.trxId || payload.TransactionId || "";
 
-    let status: "success" | "failed" = "failed";
-    if (statusCode === 1) {
-      status = "success";
+    if (!orderId) {
+      return { isValid: false, orderId: "", status: "failed" };
     }
 
-    return {
-      isValid: !!orderId,
-      orderId,
-      status,
-    };
+    // Tanpa trx_id kita tidak bisa re-query -> tolak agar tidak bisa dipalsukan.
+    if (!trxId) {
+      this.logger.warn(`[iPaymu] Callback tanpa trx_id untuk order ${orderId} -- ditolak (tidak bisa diverifikasi)`);
+      return { isValid: false, orderId, status: "failed" };
+    }
+
+    try {
+      const confirmed = await this.checkTransaction(trxId);
+      const status: "success" | "failed" = confirmed.status === "success" ? "success" : "failed";
+      return { isValid: true, orderId, status };
+    } catch (err) {
+      // Kalau gagal konfirmasi ke iPaymu, jangan tandai lunas. Aman default: failed.
+      this.logger.error(`[iPaymu] Gagal konfirmasi transaksi ${trxId} (order ${orderId})`, err as Error);
+      return { isValid: false, orderId, status: "failed" };
+    }
   }
 }
