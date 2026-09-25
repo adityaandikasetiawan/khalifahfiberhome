@@ -13,15 +13,26 @@ import { Subscription } from "../subscriptions/entities/subscription.entity";
 describe("InvoicesService - generateMonthlyInvoiceForSubscription", () => {
   let service: InvoicesService;
 
+  // createQueryBuilder dipakai guard anti-duplikat; default getOne()=null (belum ada invoice periode ini)
+  const mockQB = {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(null),
+  };
   const mockInvoiceRepo = {
     create: jest.fn((data) => data),
     save: jest.fn((data) => Promise.resolve({ ...data, id: "invoice-generated-1" })),
+    createQueryBuilder: jest.fn(() => mockQB),
   };
   const mockItemRepo = { create: jest.fn((data) => data) };
   const mockSubscriptionRepo = {};
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // restore chain query builder setelah clearAllMocks
+    mockQB.where.mockReturnThis();
+    mockQB.andWhere.mockReturnThis();
+    mockQB.getOne.mockResolvedValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InvoicesService,
@@ -47,5 +58,17 @@ describe("InvoicesService - generateMonthlyInvoiceForSubscription", () => {
     expect(invoice.items).toHaveLength(1);
     expect(Number(invoice.items[0].subtotal)).toBe(250000);
     expect(invoice.invoiceNumber).toMatch(/^INV-\d{6}-\d{4}$/);
+  });
+
+  it("TIDAK membuat invoice ganda jika periode yang sama sudah ada (anti double-generate)", async () => {
+    const existing = { id: "existing-inv", invoiceNumber: "INV-202610-0001" };
+    mockQB.getOne.mockResolvedValue(existing); // sudah ada invoice periode ini
+
+    const subscription: any = { id: "sub-1", package: { name: "Paket Standar", price: 250000 } };
+    const invoice = await service.generateMonthlyInvoiceForSubscription(subscription);
+
+    // kembalikan yang sudah ada, tidak menyimpan invoice baru
+    expect(invoice).toBe(existing);
+    expect(mockInvoiceRepo.save).not.toHaveBeenCalled();
   });
 });

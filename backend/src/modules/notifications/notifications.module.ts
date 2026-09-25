@@ -16,7 +16,18 @@ import { InvoicesModule } from "../invoices/invoices.module";
 @Module({
   imports: [
     TypeOrmModule.forFeature([NotificationLog, Invoice, SiteSetting, Customer]),
-    BullModule.registerQueue({ name: "notifications" }),
+    // Retry: jika WA gateway sementara belum siap (mis. sedang initializing
+    // setelah restart), job dicoba ulang beberapa kali dengan backoff. Kegagalan
+    // permanen (nomor tak terdaftar) TIDAK di-retry (lihat sendWhatsApp).
+    BullModule.registerQueue({
+      name: "notifications",
+      defaultJobOptions: {
+        attempts: 5,
+        backoff: { type: "exponential", delay: 30000 }, // 30s, 60s, 120s, 240s
+        removeOnComplete: 100,
+        removeOnFail: 500,
+      },
+    }),
     InvoicesModule,
   ],
   controllers: [WhatsAppController],

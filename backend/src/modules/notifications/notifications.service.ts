@@ -239,8 +239,16 @@ export class NotificationsService {
       await this.whatsAppService.sendMessage(params.phone, message);
       await this.logResult(params, "whatsapp", "sent");
     } catch (err) {
+      const msg = (err as Error).message ?? "";
       this.logger.error(`Gagal kirim WA ${params.type} ke ${params.phone}`, err as Error);
-      await this.logResult(params, "whatsapp", "failed", (err as Error).message);
+      // Kegagalan SEMENTARA (gateway belum siap, mis. sedang initializing setelah
+      // restart): lempar ulang agar BullMQ me-retry job ini nanti saat gateway ready.
+      // Jangan catat "failed" permanen supaya tidak menghalangi retry (alreadySent).
+      if (/belum siap|not ready|initializing|disconnected/i.test(msg)) {
+        throw err;
+      }
+      // Kegagalan PERMANEN (nomor tak terdaftar, dll): catat failed, jangan retry.
+      await this.logResult(params, "whatsapp", "failed", msg);
     }
   }
 

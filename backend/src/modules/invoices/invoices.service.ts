@@ -106,6 +106,23 @@ export class InvoicesService {
     const dueDate = new Date(now);
     dueDate.setDate(dueDate.getDate() + 7); // jatuh tempo 7 hari
 
+    // Guard anti duplikat: kalau invoice untuk subscription + periode ini sudah
+    // ada (mis. cron jalan >1 instance, atau job ter-retry), kembalikan yang ada
+    // daripada membuat invoice ganda (mencegah pelanggan tertagih dobel).
+    const existing = await this.invoiceRepo
+      .createQueryBuilder("invoice")
+      .where("invoice.subscriptionId = :sid", { sid: subscription.id })
+      .andWhere("CAST(invoice.periodStart AS DATE) = :ps", {
+        ps: periodStart.toISOString().split("T")[0],
+      })
+      .getOne();
+    if (existing) {
+      this.logger.warn(
+        `Invoice periode ${periodStart.toISOString().split("T")[0]} untuk subscription ${subscription.id} sudah ada (${existing.invoiceNumber}), skip pembuatan ganda`,
+      );
+      return existing;
+    }
+
     const item = this.itemRepo.create({
       description: `Langganan ${subscription.package.name} - ${periodStart.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`,
       qty: 1,

@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -12,6 +13,17 @@ async function bootstrap() {
   // reverse proxy -- dipakai oleh WebhookIpWhitelistGuard. Aman diaktifkan
   // selalu karena Nginx di docker-compose.yml sudah menimpa header ini.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
+  // HTTP security headers (HSTS, X-Frame-Options, noSniff, dll).
+  // CSP dimatikan karena API ini menyajikan Swagger UI (CSP default helmet
+  // memblokir aset inline Swagger). Endpoint API murni data JSON, jadi tidak
+  // butuh CSP; proteksi header lain tetap aktif.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
 
   app.setGlobalPrefix('api/v1');
 
