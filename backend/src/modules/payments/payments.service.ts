@@ -163,6 +163,25 @@ export class PaymentsService {
         customerId: invoice.subscription?.customer?.id,
       });
 
+      // Notifikasi WA ke ADMIN setiap ada pembayaran pelanggan masuk.
+      // Nomor admin dari env ADMIN_WA_NUMBER (dukung beberapa nomor, pisah koma).
+      const adminWa = this.config.get<string>("ADMIN_WA_NUMBER", "");
+      if (adminWa) {
+        await this.notificationsQueue.add(
+          "admin_payment_alert",
+          {
+            adminNumbers: adminWa,
+            invoiceId: invoice.id,
+            amount: Number(invoice.totalAmount),
+            invoiceNumber: invoice.invoiceNumber,
+            customerName: invoice.subscription?.customer?.name,
+            customerNumber: invoice.subscription?.customer?.customerNumber,
+            paidAt: new Date().toISOString(),
+          },
+          { attempts: 5, backoff: { type: "exponential", delay: 30000 } },
+        );
+      }
+
       const subscription = invoice.subscription;
       const customer = subscription?.customer;
 
@@ -257,6 +276,112 @@ export class PaymentsService {
 
   findByInvoice(invoiceId: string) {
     return this.repo.find({ where: { invoiceId }, order: { createdAt: "DESC" } });
+  }
+
+  /**
+   * Histori pembayaran untuk panel admin. Mendukung filter status, rentang
+   * tanggal (createdAt), pencarian (nama/nomor pelanggan/nomor invoice/referensi
+   * gateway), dan paging. Mengembalikan data + total untuk kebutuhan tabel admin.
+   */
+  async findAll(query: {
+    status?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(query.limit) || 25));
+
+    const qb = this.buildListQuery(query);
+    qb.orderBy("payment.createdAt", "DESC")
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+    return {
+      data: rows.map((p) => this.toListRow(p)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /** CSV export histori pembayaran dengan filter yang sama (tanpa paging). */
+  async exportCsv(query: { status?: string; from?: string; to?: string; search?: string }): Promise<string> {
+    const qb = this.buildListQuery(query).orderBy("payment.createdAt", "DESC");
+    const rows = await qb.getMany();
+
+    const header = ["Tanggal", "Pelanggan", "No Pelanggan", "No Invoice", "Metode", "Jumlah", "Status", "Dibayar", "Referensi"];
+    const csvEscape = (v: any) => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [header.join(",")];
+    for (const p of rows) {
+      const r = this.toListRow(p);
+      lines.push(
+        [
+          r.createdAt ? new Date(r.createdAt).toISOString() : "",
+          csvEscape(r.customerName),
+          csvEscape(r.customerNumber),
+          csvEscape(r.invoiceNumber),
+          r.paymentMethod,
+          r.amount,
+          r.status,
+          r.paidAt ? new Date(r.paidAt).toISOString() : "",
+          csvEscape(r.gatewayReference),
+        ].join(","),
+      );
+    }
+    return lines.join("\n");
+  }
+
+  private buildListQuery(query: { status?: string; from?: string; to?: string; search?: string }) {
+    const qb = this.repo
+      .createQueryBuilder("payment")
+      .leftJoinAndSelect("payment.invoice", "invoice")
+      .leftJoinAndSelect("invoice.subscription", "subscription")
+      .leftJoinAndSelect("subscription.customer", "customer");
+
+    if (query.status) {
+      qb.andWhere("payment.status = :status", { status: query.status });
+    }
+    if (query.from) {
+      qb.andWhere("payment.createdAt >= :from", { from: new Date(query.from) });
+    }
+    if (query.to) {
+      // inklusif sampai akhir hari 'to'
+      const to = new Date(query.to);
+      to.setHours(23, 59, 59, 999);
+      qb.andWhere("payment.createdAt <= :to", { to });
+    }
+    if (query.search) {
+      qb.andWhere(
+        "(customer.name ILIKE :q OR customer.\"customerNumber\" ILIKE :q OR invoice.\"invoiceNumber\" ILIKE :q OR payment.\"gatewayReference\" ILIKE :q)",
+        { q: `%${query.search}%` },
+      );
+    }
+    return qb;
+  }
+
+  private toListRow(p: Payment) {
+    const customer = p.invoice?.subscription?.customer;
+    return {
+      id: p.id,
+      createdAt: p.createdAt,
+      paidAt: p.paidAt ?? null,
+      amount: Number(p.amount),
+      status: p.status,
+      paymentMethod: p.paymentMethod,
+      gatewayReference: p.gatewayReference ?? null,
+      invoiceId: p.invoiceId,
+      invoiceNumber: p.invoice?.invoiceNumber ?? null,
+      customerName: customer?.name ?? null,
+      customerNumber: customer?.customerNumber ?? null,
+    };
   }
 
   /**

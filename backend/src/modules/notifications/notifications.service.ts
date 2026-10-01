@@ -322,4 +322,60 @@ export class NotificationsService {
   findByCustomer(customerId: string) {
     return this.repo.find({ where: { customerId }, order: { sentAt: "DESC" } });
   }
+
+  /**
+   * Kirim notifikasi WA ke ADMIN setiap ada pembayaran pelanggan masuk.
+   * Mendukung beberapa nomor admin (dipisah koma). Dilempar ulang jika gateway
+   * belum siap supaya job di-retry BullMQ (konsisten dgn sendWhatsApp).
+   */
+  async sendAdminPaymentAlert(data: {
+    adminNumbers: string;
+    amount: number;
+    invoiceNumber?: string;
+    customerName?: string;
+    customerNumber?: string;
+    paidAt?: string;
+  }) {
+    const numbers = (data.adminNumbers || "")
+      .split(",")
+      .map((n) => this.normalizePhone(n))
+      .filter(Boolean);
+    if (numbers.length === 0) return;
+
+    const amount = Number(data.amount).toLocaleString("id-ID");
+    const waktu = data.paidAt
+      ? new Date(data.paidAt).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })
+      : new Date().toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    const message =
+      `💰 *Pembayaran Masuk*\n\n` +
+      `👤 Pelanggan: ${data.customerName ?? "-"}${data.customerNumber ? ` (${data.customerNumber})` : ""}\n` +
+      `🧾 Invoice: ${data.invoiceNumber ?? "-"}\n` +
+      `💵 Jumlah: Rp ${amount}\n` +
+      `🕒 Waktu: ${waktu}`;
+
+    for (const num of numbers) {
+      try {
+        await this.whatsAppService.sendMessage(num, message);
+        this.logger.log(`Alert pembayaran dikirim ke admin ${num}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? "";
+        this.logger.error(`Gagal kirim alert pembayaran ke admin ${num}`, err as Error);
+        // Kegagalan sementara (gateway belum siap) -> lempar agar job di-retry.
+        if (/belum siap|not ready|initializing|disconnected/i.test(msg)) {
+          throw err;
+        }
+        // Kegagalan permanen (nomor admin salah) -> jangan retry, cukup log.
+      }
+    }
+  }
+
+  /** Normalisasi nomor ke format 62xxxxxxxxxx (buang spasi, strip, + dan 0 depan). */
+  private normalizePhone(raw: string): string {
+    let n = (raw || "").replace(/[\s\-()]/g, "").trim();
+    if (!n) return "";
+    if (n.startsWith("+")) n = n.slice(1);
+    if (n.startsWith("0")) n = "62" + n.slice(1);
+    if (!n.startsWith("62")) n = "62" + n;
+    return n;
+  }
 }

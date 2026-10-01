@@ -64,6 +64,38 @@ describe("NotificationsService - ketahanan WhatsApp", () => {
     );
   });
 
+  describe("sendAdminPaymentAlert", () => {
+    it("mengirim WA ke nomor admin (dinormalkan ke 62) dengan detail pembayaran", async () => {
+      mockWhatsApp.sendMessage.mockResolvedValue(undefined);
+      await service.sendAdminPaymentAlert({
+        adminNumbers: "+62811580929",
+        amount: 200000,
+        invoiceNumber: "INV-1",
+        customerName: "Budi",
+        customerNumber: "KHA-010",
+      });
+      expect(mockWhatsApp.sendMessage).toHaveBeenCalledTimes(1);
+      const [num, msg] = mockWhatsApp.sendMessage.mock.calls[0];
+      expect(num).toBe("62811580929");
+      expect(msg).toMatch(/Pembayaran Masuk/);
+      expect(msg).toMatch(/Budi/);
+      expect(msg).toMatch(/200\.000/);
+    });
+
+    it("mendukung beberapa nomor admin (pisah koma)", async () => {
+      mockWhatsApp.sendMessage.mockResolvedValue(undefined);
+      await service.sendAdminPaymentAlert({ adminNumbers: "081111,62822", amount: 100000 });
+      expect(mockWhatsApp.sendMessage).toHaveBeenCalledTimes(2);
+      expect(mockWhatsApp.sendMessage.mock.calls[0][0]).toBe("6281111");
+      expect(mockWhatsApp.sendMessage.mock.calls[1][0]).toBe("62822");
+    });
+
+    it("tidak kirim apa pun kalau ADMIN_WA_NUMBER kosong", async () => {
+      await service.sendAdminPaymentAlert({ adminNumbers: "", amount: 100000 });
+      expect(mockWhatsApp.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
   it("RE-THROW saat WA gateway belum siap (agar job di-retry BullMQ)", async () => {
     mockWhatsApp.sendMessage.mockRejectedValue(
       new Error("WhatsApp gateway belum siap (status: initializing). Scan QR di admin panel terlebih dahulu."),

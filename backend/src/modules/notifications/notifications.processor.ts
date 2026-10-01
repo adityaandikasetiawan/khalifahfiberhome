@@ -56,6 +56,12 @@ export class NotificationsProcessor extends WorkerHost {
   }
 
   async process(job: Job): Promise<void> {
+    // Job khusus: alert WA ke admin tiap ada pembayaran pelanggan masuk.
+    if (job.name === "admin_payment_alert") {
+      await this.notificationsService.sendAdminPaymentAlert(job.data);
+      return;
+    }
+
     const { invoiceId, customerId } = job.data;
     const invoice = await this.invoicesService.findOne(invoiceId);
     const customer = invoice.subscription.customer;

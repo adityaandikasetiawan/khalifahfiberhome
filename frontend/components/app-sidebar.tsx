@@ -21,6 +21,7 @@ import {
   MessageCircle,
   UserPlus,
   Wallet,
+  CreditCard,
   Radio,
   ChevronDown,
 } from "lucide-react";
@@ -51,6 +52,7 @@ const NAV: NavEntry[] = [
     icon: Wallet,
     children: [
       { href: "/invoices", label: "Invoice", icon: FileText },
+      { href: "/payments", label: "Pembayaran", icon: CreditCard },
       { href: "/packages", label: "Paket", icon: Package },
       { href: "/reports", label: "Laporan", icon: BarChart3 },
     ],

@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from "@nestjs/common";
+import { Controller, Get, Post, Body, Param, Query, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { IsIn } from "class-validator";
 import { PaymentsService } from "./payments.service";
@@ -21,6 +22,42 @@ export class PaymentsController {
   @ApiOperation({ summary: "Buat transaksi pembayaran (VA/QRIS/e-wallet) untuk sebuah invoice" })
   createTransaction(@Body() dto: CreatePaymentTransactionDto) {
     return this.service.createTransaction(dto);
+  }
+
+  @Get()
+  @ApiOperation({ summary: "Histori pembayaran (admin) dengan filter status/tanggal/pencarian + paging" })
+  findAll(
+    @Query("status") status?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("search") search?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.service.findAll({
+      status,
+      from,
+      to,
+      search,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Get("export")
+  @ApiOperation({ summary: "Export histori pembayaran ke CSV (filter sama seperti list)" })
+  async export(
+    @Res() res: Response,
+    @Query("status") status?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("search") search?: string,
+  ) {
+    const csv = await this.service.exportCsv({ status, from, to, search });
+    const filename = `pembayaran-${new Date().toISOString().split("T")[0]}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send("\uFEFF" + csv); // BOM agar Excel membaca UTF-8 dengan benar
   }
 
   @Get("invoice/:invoiceId")
