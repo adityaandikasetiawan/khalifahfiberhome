@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
-import { IsString, IsNotEmpty } from "class-validator";
+import { IsString, IsNotEmpty, IsOptional } from "class-validator";
 import { WhatsAppService } from "./whatsapp.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -14,6 +14,10 @@ class SendTestDto {
   @IsString()
   @IsNotEmpty()
   message: string;
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
 }
 
 @ApiTags("whatsapp-gateway")
@@ -48,7 +52,7 @@ export class WhatsAppController {
   @Post("send-test")
   @ApiOperation({ summary: "Kirim pesan test untuk memverifikasi gateway" })
   async sendTest(@Body() dto: SendTestDto) {
-    await this.wa.sendMessage(dto.phone, dto.message);
+    await this.wa.sendMessage(dto.phone, dto.message, dto.imageUrl);
     return { sent: true };
   }
 }

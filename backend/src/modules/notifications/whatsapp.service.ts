@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Client, LocalAuth } from "whatsapp-web.js";
+import { Client, LocalAuth, MessageMedia } from "whatsapp-web.js";
 import * as QRCode from "qrcode";
 import * as fs from "fs";
 import * as path from "path";
@@ -238,14 +238,50 @@ export class WhatsAppService implements OnModuleInit {
     return p;
   }
 
-  async sendMessage(phone: string, message: string): Promise<void> {
+  async sendMessage(phone: string, message: string, imageUrl?: string): Promise<void> {
     if (this.provider === "webjs") {
-      return this.sendViaWebJs(phone, message);
+      return this.sendViaWebJs(phone, message, imageUrl);
     }
     return this.sendViaCloudApi(phone, message);
   }
 
-  private async sendViaWebJs(phone: string, message: string): Promise<void> {
+  /**
+   * Resolve imageUrl menjadi MessageMedia.
+   * - URL /uploads/... atau path relatif -> baca file lokal dari backend/public
+   * - URL http(s) -> ambil via MessageMedia.fromUrl
+   * Mengembalikan null bila gagal (biar pengiriman fallback ke teks saja).
+   */
+  private async resolveMedia(imageUrl: string): Promise<MessageMedia | null> {
+    try {
+      // Ambil buffer gambar (dari file lokal publik atau URL http).
+      let buf: Buffer;
+      if (/^https?:\/\//i.test(imageUrl)) {
+        const res = await fetch(imageUrl);
+        if (!res.ok) throw new Error(`fetch gambar gagal: ${res.status}`);
+        buf = Buffer.from(await res.arrayBuffer());
+      } else {
+        const rel = imageUrl.replace(/^\//, "");
+        const fullPath = path.join(process.cwd(), "public", rel);
+        if (!fs.existsSync(fullPath)) {
+          this.logger.warn(`File gambar broadcast tidak ditemukan: ${fullPath}`);
+          return null;
+        }
+        buf = await fs.promises.readFile(fullPath);
+      }
+
+      // Konversi ke JPEG untuk kompatibilitas maksimal di WhatsApp.
+      // (WebP kadang memicu error serialisasi/sticker di whatsapp-web.js.)
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const sharp = require("sharp");
+      const jpeg = await sharp(buf).jpeg({ quality: 85 }).toBuffer();
+      return new MessageMedia("image/jpeg", jpeg.toString("base64"), "gambar.jpg");
+    } catch (err) {
+      this.logger.error(`Gagal memuat gambar WA (${imageUrl})`, err as Error);
+      return null;
+    }
+  }
+
+  private async sendViaWebJs(phone: string, message: string, imageUrl?: string): Promise<void> {
     if (!this.client || this.status !== "ready") {
       throw new Error(
         `WhatsApp gateway belum siap (status: ${this.status}). Scan QR di admin panel terlebih dahulu.`,
@@ -256,6 +292,31 @@ export class WhatsAppService implements OnModuleInit {
     const numberId = await this.client.getNumberId(number);
     if (!numberId) {
       throw new Error(`Nomor ${phone} tidak terdaftar di WhatsApp.`);
+    }
+
+    if (imageUrl) {
+      const media = await this.resolveMedia(imageUrl);
+      if (media) {
+        try {
+          // Kirim gambar dengan caption = pesan (teks + gambar dalam 1 pesan).
+          await this.client.sendMessage(numberId._serialized, media, { caption: message });
+          this.logger.log(`Pesan WA + gambar (webjs) terkirim ke ${phone}`);
+          return;
+        } catch (err) {
+          // Fallback: beberapa versi WhatsApp Web/library gagal kirim media
+          // (error "id property"). Kirim teks + link gambar agar pesan tetap sampai.
+          this.logger.warn(
+            `Kirim media WA gagal (${(err as Error).message}); fallback ke teks + link untuk ${phone}`,
+          );
+          const base = (process.env.PUBLIC_MEDIA_BASE_URL || process.env.PORTAL_BASE_URL || "").replace(/\/(portal)?\/?$/, "");
+          const link = /^https?:\/\//i.test(imageUrl) ? imageUrl : `${base}${imageUrl}`;
+          const textWithLink = `${message}\n\n🖼️ Gambar: ${link}`;
+          await this.client.sendMessage(numberId._serialized, textWithLink);
+          this.logger.log(`Pesan WA (teks + link gambar) terkirim ke ${phone}`);
+          return;
+        }
+      }
+      // gambar gagal dimuat -> fallback kirim teks saja
     }
     await this.client.sendMessage(numberId._serialized, message);
     this.logger.log(`Pesan WA (webjs) terkirim ke ${phone}`);

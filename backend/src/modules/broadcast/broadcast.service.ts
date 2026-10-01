@@ -42,6 +42,7 @@ export class BroadcastService {
       broadcastId: broadcast.id,
       title: broadcast.title,
       message: broadcast.message,
+      imageUrl: broadcast.imageUrl,
       targetType: broadcast.targetType,
       targetRouterId: broadcast.targetRouterId,
     });

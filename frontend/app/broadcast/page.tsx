@@ -51,9 +51,36 @@ export default function BroadcastPage() {
     message: "",
     targetType: "all",
     targetRouterId: "",
+    imageUrl: "",
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const mediaBase = (process.env.NEXT_PUBLIC_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+  const imgSrc = (url?: string) => (!url ? "" : url.startsWith("http") ? url : `${mediaBase}${url}`);
+
+  async function handleUploadImage(file: File) {
+    setError("");
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Ukuran gambar maksimal 5 MB.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.post("/site-settings/upload-image", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setForm((prev) => ({ ...prev, imageUrl: res.data.data.url }));
+    } catch (err: any) {
+      const msg = err?.response?.data?.message ?? "Gagal upload gambar.";
+      setError(Array.isArray(msg) ? msg.join(", ") : msg);
+    } finally {
+      setUploading(false);
+    }
+  }
 
   function loadBroadcasts() {
     api.get("/broadcast").then((res) => setBroadcasts(res.data.data));
@@ -81,8 +108,9 @@ export default function BroadcastPage() {
       if (form.targetType === "router" && form.targetRouterId) {
         payload.targetRouterId = form.targetRouterId;
       }
+      if (form.imageUrl) payload.imageUrl = form.imageUrl;
       await api.post("/broadcast", payload);
-      setForm({ title: "", message: "", targetType: "all", targetRouterId: "" });
+      setForm({ title: "", message: "", targetType: "all", targetRouterId: "", imageUrl: "" });
       loadBroadcasts();
     } catch (err: any) {
       setError(err?.response?.data?.message ?? "Gagal membuat broadcast");
@@ -134,6 +162,36 @@ export default function BroadcastPage() {
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   placeholder="Isi pesan broadcast..."
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Gambar (opsional, maks 5MB)</Label>
+                <div className="flex items-center gap-3 rounded-md border border-dashed p-3">
+                  {form.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imgSrc(form.imageUrl)} alt="Lampiran" className="h-16 w-24 rounded object-cover border" />
+                  ) : (
+                    <div className="flex h-16 w-24 items-center justify-center rounded border bg-muted text-[10px] text-muted-foreground">
+                      Tidak ada
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploading}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadImage(f); e.target.value = ""; }}
+                      className="text-xs"
+                    />
+                    {uploading && <span className="text-xs text-muted-foreground">Mengunggah &amp; mengonversi...</span>}
+                    {form.imageUrl && (
+                      <button type="button" onClick={() => update("imageUrl", "")} className="text-left text-xs text-destructive hover:underline">
+                        Hapus gambar
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Gambar dikirim bersama pesan (caption). Cocok untuk info maintenance/promo.</p>
               </div>
 
               <div className="space-y-2">

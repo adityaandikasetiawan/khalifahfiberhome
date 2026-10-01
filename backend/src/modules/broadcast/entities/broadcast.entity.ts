@@ -14,6 +14,9 @@ export class Broadcast {
   @Column({ type: "text" })
   message: string;
 
+  @Column({ type: "varchar", nullable: true, comment: "URL gambar lampiran (opsional)" })
+  imageUrl?: string;
+
   @Column({ type: "enum", enum: ["all", "router", "loket"], default: "all" })
   targetType: BroadcastTargetType;
 

@@ -11,6 +11,11 @@ export class CreateBroadcastDto {
   @IsString()
   message: string;
 
+  @ApiPropertyOptional({ example: "/uploads/hero/xxx.webp", description: "URL gambar lampiran (opsional)" })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
   @ApiPropertyOptional({ enum: ["all", "router", "loket"], default: "all" })
   @IsOptional()
   @IsEnum(["all", "router", "loket"] as any)

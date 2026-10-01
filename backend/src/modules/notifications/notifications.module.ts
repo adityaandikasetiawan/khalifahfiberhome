@@ -5,6 +5,8 @@ import { NotificationLog } from "./entities/notification-log.entity";
 import { Invoice } from "../invoices/entities/invoice.entity";
 import { SiteSetting } from "../site-settings/entities/site-setting.entity";
 import { Customer } from "../customers/entities/customer.entity";
+import { Broadcast } from "../broadcast/entities/broadcast.entity";
+import { Subscription } from "../subscriptions/entities/subscription.entity";
 import { NotificationsService } from "./notifications.service";
 import { WhatsAppService } from "./whatsapp.service";
 import { EmailService } from "./email.service";
@@ -15,7 +17,7 @@ import { InvoicesModule } from "../invoices/invoices.module";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([NotificationLog, Invoice, SiteSetting, Customer]),
+    TypeOrmModule.forFeature([NotificationLog, Invoice, SiteSetting, Customer, Broadcast, Subscription]),
     // Retry: jika WA gateway sementara belum siap (mis. sedang initializing
     // setelah restart), job dicoba ulang beberapa kali dengan backoff. Kegagalan
     // permanen (nomor tak terdaftar) TIDAK di-retry (lihat sendWhatsApp).

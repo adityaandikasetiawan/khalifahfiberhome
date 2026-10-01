@@ -5,8 +5,11 @@ import { Repository } from "typeorm";
 import { Job } from "bullmq";
 import * as crypto from "crypto";
 import { NotificationsService } from "./notifications.service";
+import { WhatsAppService } from "./whatsapp.service";
 import { InvoicesService } from "../invoices/invoices.service";
 import { Customer } from "../customers/entities/customer.entity";
+import { Broadcast } from "../broadcast/entities/broadcast.entity";
+import { Subscription } from "../subscriptions/entities/subscription.entity";
 
 /**
  * Worker BullMQ untuk queue "notifications". Memproses job yang di-push oleh
@@ -19,10 +22,64 @@ export class NotificationsProcessor extends WorkerHost {
 
   constructor(
     private readonly notificationsService: NotificationsService,
+    private readonly whatsAppService: WhatsAppService,
     private readonly invoicesService: InvoicesService,
     @InjectRepository(Customer) private readonly customerRepo: Repository<Customer>,
+    @InjectRepository(Broadcast) private readonly broadcastRepo: Repository<Broadcast>,
+    @InjectRepository(Subscription) private readonly subscriptionRepo: Repository<Subscription>,
   ) {
     super();
+  }
+
+  /**
+   * Proses broadcast: ambil pelanggan sesuai target, kirim WA (teks + gambar
+   * opsional), hitung sukses/gagal, dan update status broadcast ke "sent".
+   */
+  private async processBroadcast(data: {
+    broadcastId: string;
+    title: string;
+    message: string;
+    imageUrl?: string;
+    targetType?: string;
+    targetRouterId?: string;
+  }): Promise<void> {
+    const text = data.title ? `*${data.title}*\n\n${data.message}` : data.message;
+
+    // Ambil penerima: pelanggan aktif yg punya nomor HP. Filter per router bila dipilih.
+    const qb = this.subscriptionRepo
+      .createQueryBuilder("s")
+      .leftJoinAndSelect("s.customer", "c")
+      .where("s.status = :st", { st: "active" })
+      .andWhere("c.status = :cst", { cst: "active" })
+      .andWhere("c.phone IS NOT NULL AND c.phone <> ''");
+    if (data.targetType === "router" && data.targetRouterId) {
+      qb.andWhere("s.routerId = :rid", { rid: data.targetRouterId });
+    }
+    const subs = await qb.getMany();
+
+    // Dedup nomor (satu pelanggan bisa >1 subscription)
+    const phones = Array.from(
+      new Set(subs.map((s) => s.customer?.phone).filter((p): p is string => !!p)),
+    );
+
+    let sent = 0;
+    let failed = 0;
+    for (const phone of phones) {
+      try {
+        await this.whatsAppService.sendMessage(phone, text, data.imageUrl || undefined);
+        sent++;
+      } catch (err) {
+        failed++;
+        this.logger.error(`Broadcast gagal ke ${phone}: ${(err as Error).message}`);
+      }
+    }
+
+    await this.broadcastRepo.update(data.broadcastId, {
+      status: "sent",
+      sentCount: sent,
+      failedCount: failed,
+    });
+    this.logger.log(`Broadcast ${data.broadcastId} selesai: ${sent} terkirim, ${failed} gagal (dari ${phones.length} nomor)`);
   }
 
   /**
@@ -59,6 +116,12 @@ export class NotificationsProcessor extends WorkerHost {
     // Job khusus: alert WA ke admin tiap ada pembayaran pelanggan masuk.
     if (job.name === "admin_payment_alert") {
       await this.notificationsService.sendAdminPaymentAlert(job.data);
+      return;
+    }
+
+    // Job khusus: broadcast (teks + gambar opsional) ke pelanggan.
+    if (job.name === "broadcast") {
+      await this.processBroadcast(job.data);
       return;
     }
 
