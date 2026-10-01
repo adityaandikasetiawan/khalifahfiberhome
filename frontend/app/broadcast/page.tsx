@@ -36,6 +36,13 @@ const statusVariant = (status: string) => {
   }
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draf",
+  sending: "Mengirim",
+  sent: "Terkirim",
+  failed: "Gagal",
+};
+
 export default function BroadcastPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [routers, setRouters] = useState<RouterOption[]>([]);
@@ -189,7 +196,7 @@ export default function BroadcastPage() {
                     <TableCell className="font-medium">{bc.title}</TableCell>
                     <TableCell className="text-sm">{bc.targetType === "all" ? "Semua" : "Router"}</TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(bc.status) as any}>{bc.status}</Badge>
+                      <Badge variant={statusVariant(bc.status) as any}>{STATUS_LABEL[bc.status] ?? bc.status}</Badge>
                     </TableCell>
                     <TableCell>{bc.sentCount ?? 0}</TableCell>
                     <TableCell>{bc.failedCount ?? 0}</TableCell>

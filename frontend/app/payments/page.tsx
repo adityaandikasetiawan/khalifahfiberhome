@@ -70,7 +70,7 @@ export default function PaymentsPage() {
     (goPage = 1) => {
       setLoading(true);
       api
-        .get("/payments", { params: buildParams({ page: goPage, limit: 25 }) })
+        .get("/payments", { params: buildParams({ page: goPage, limit: 10 }) })
         .then((res) => {
           const d = res.data.data ?? res.data;
           setRows(d.data ?? []);

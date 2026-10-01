@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Activity, RefreshCw, Wifi } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Activity, RefreshCw, Wifi, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ interface ActiveConn {
   service: string;
 }
 
+const PAGE_SIZE = 10;
+
 export default function MonitoringPage() {
   const [routers, setRouters] = useState<RouterItem[]>([]);
   const [selectedRouter, setSelectedRouter] = useState<string>("");
@@ -30,6 +32,7 @@ export default function MonitoringPage() {
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string>("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.get("/routers").then((res) => {
@@ -61,6 +64,17 @@ export default function MonitoringPage() {
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.address.toLowerCase().includes(search.toLowerCase())
   );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedRouter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = useMemo(() => filtered.slice(start, start + PAGE_SIZE), [filtered, start]);
+  const showingFrom = filtered.length === 0 ? 0 : start + 1;
+  const showingTo = Math.min(start + PAGE_SIZE, filtered.length);
 
   const currentRouter = routers.find((r) => r.id === selectedRouter);
 
@@ -123,7 +137,10 @@ export default function MonitoringPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Koneksi PPPoE Aktif</CardTitle>
+            <CardTitle className="text-lg">
+              Koneksi PPPoE Aktif{" "}
+              <span className="text-sm font-normal text-muted-foreground">({filtered.length})</span>
+            </CardTitle>
             <input
               type="text"
               placeholder="Cari username atau IP..."
@@ -134,37 +151,54 @@ export default function MonitoringPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Username PPPoE</TableHead>
-                <TableHead>IP Address</TableHead>
-                <TableHead>Uptime</TableHead>
-                <TableHead>Service</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((c, i) => (
-                <TableRow key={i}>
-                  <TableCell className="font-medium">{c.name}</TableCell>
-                  <TableCell className="font-mono text-sm">{c.address}</TableCell>
-                  <TableCell>{c.uptime}</TableCell>
-                  <TableCell>{c.service}</TableCell>
-                  <TableCell>
-                    <Badge variant="success">Online</Badge>
-                  </TableCell>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead>Username PPPoE</TableHead>
+                  <TableHead className="w-[160px]">IP Address</TableHead>
+                  <TableHead className="w-[140px]">Uptime</TableHead>
+                  <TableHead className="w-[120px]">Service</TableHead>
+                  <TableHead className="w-[100px]">Status</TableHead>
                 </TableRow>
-              ))}
-              {filtered.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    {loading ? "Memuat data dari router..." : connections.length === 0 ? "Tidak ada koneksi aktif atau router belum terhubung" : "Tidak ditemukan"}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((c, i) => (
+                  <TableRow key={i} className="hover:bg-muted/40">
+                    <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell className="font-mono text-sm">{c.address}</TableCell>
+                    <TableCell>{c.uptime}</TableCell>
+                    <TableCell>{c.service}</TableCell>
+                    <TableCell>
+                      <Badge variant="success">Online</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-10">
+                      {loading ? "Memuat data dari router..." : connections.length === 0 ? "Tidak ada koneksi aktif atau router belum terhubung" : "Tidak ditemukan"}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-sm text-muted-foreground">
+              Menampilkan {showingFrom}–{showingTo} dari {filtered.length} koneksi
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" /> Sebelumnya
+              </Button>
+              <span className="text-sm text-muted-foreground">Halaman {currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+                Berikutnya <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </AdminLayout>

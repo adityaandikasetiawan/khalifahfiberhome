@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,8 @@ interface Technician {
   name: string;
 }
 
+const PAGE_SIZE = 10;
+
 const TYPE_LABEL: Record<string, string> = { suspend: "Isolir", activate: "Aktivasi" };
 const STATUS_LABEL: Record<string, string> = {
   pending: "Pending",
@@ -35,6 +38,7 @@ export default function IsolirTasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [filter, setFilter] = useState("pending");
+  const [page, setPage] = useState(1);
 
   async function load() {
     const res = await api.get("/isolir-tasks", { params: { status: filter || undefined } });
@@ -61,6 +65,17 @@ export default function IsolirTasksPage() {
   function technicianName(id?: string) {
     return technicians.find((t) => t.id === id)?.name;
   }
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter]);
+
+  const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = useMemo(() => tasks.slice(start, start + PAGE_SIZE), [tasks, start]);
+  const showingFrom = tasks.length === 0 ? 0 : start + 1;
+  const showingTo = Math.min(start + PAGE_SIZE, tasks.length);
 
   return (
     <AdminLayout>
@@ -89,28 +104,31 @@ export default function IsolirTasksPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Daftar Tugas</CardTitle>
+          <CardTitle className="text-lg">
+            Daftar Tugas <span className="text-sm font-normal text-muted-foreground">({tasks.length})</span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Jenis</TableHead>
-                <TableHead>Subscription ID</TableHead>
-                <TableHead>Catatan</TableHead>
-                <TableHead>Ditugaskan ke</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tasks.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell>
-                    <Badge variant={t.type === "suspend" ? "danger" : "success"}>
-                      {TYPE_LABEL[t.type]}
-                    </Badge>
-                  </TableCell>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="w-[110px]">Jenis</TableHead>
+                  <TableHead className="w-[150px]">Subscription ID</TableHead>
+                  <TableHead>Catatan</TableHead>
+                  <TableHead className="w-[180px]">Ditugaskan ke</TableHead>
+                  <TableHead className="w-[120px]">Status</TableHead>
+                  <TableHead className="w-[130px] text-right">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((t) => (
+                  <TableRow key={t.id} className="hover:bg-muted/40">
+                    <TableCell>
+                      <Badge variant={t.type === "suspend" ? "danger" : "success"}>
+                        {TYPE_LABEL[t.type]}
+                      </Badge>
+                    </TableCell>
                   <TableCell className="font-mono text-xs">{t.subscriptionId.slice(0, 8)}...</TableCell>
                   <TableCell className="text-muted-foreground">{t.notes ?? "-"}</TableCell>
                   <TableCell>
@@ -141,15 +159,31 @@ export default function IsolirTasksPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {tasks.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                    Tidak ada tugas
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                {tasks.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
+                      Tidak ada tugas
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-sm text-muted-foreground">
+              Menampilkan {showingFrom}–{showingTo} dari {tasks.length} tugas
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" /> Sebelumnya
+              </Button>
+              <span className="text-sm text-muted-foreground">Halaman {currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+                Berikutnya <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </AdminLayout>

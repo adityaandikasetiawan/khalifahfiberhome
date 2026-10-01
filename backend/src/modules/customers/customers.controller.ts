@@ -23,8 +23,12 @@ export class CustomersController {
 
   @Get()
   @ApiOperation({ summary: "List pelanggan (support search & filter status)" })
-  findAll(@Query("search") search?: string, @Query("status") status?: string) {
-    return this.service.findAll(search, status);
+  findAll(
+    @Query("search") search?: string,
+    @Query("status") status?: string,
+    @Query("routerId") routerId?: string,
+  ) {
+    return this.service.findAll(search, status, routerId);
   }
 
   @Get(":id")

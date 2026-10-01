@@ -57,11 +57,34 @@ export class CustomersService {
     return `KHA-${Date.now().toString().slice(-6)}`;
   }
 
-  async findAll(search?: string, status?: string) {
+  async findAll(search?: string, status?: string, routerId?: string) {
     const where: any = {};
     if (search) where.name = ILike(`%${search}%`);
     if (status) where.status = status;
-    return this.repo.find({ where, order: { createdAt: "DESC" } });
+    const customers = await this.repo.find({
+      where,
+      relations: ["subscriptions", "subscriptions.package"],
+      order: { createdAt: "DESC" },
+    });
+
+    // Lampirkan nama router tiap pelanggan (routerId di subscription hanya UUID).
+    const routers = await this.repo.manager.query(`SELECT id, name FROM routers`);
+    const routerMap = new Map<string, string>(routers.map((r: any) => [r.id, r.name]));
+
+    const enriched = customers.map((c) => {
+      const sub = c.subscriptions?.[0];
+      const rId = sub?.routerId ?? null;
+      return {
+        ...c,
+        routerId: rId,
+        routerName: rId ? routerMap.get(rId) ?? null : null,
+        packageName: sub?.package?.name ?? null,
+        pppoeUsername: sub?.pppoeUsername ?? null,
+      };
+    });
+
+    // Filter per router (dilakukan setelah enrich karena router ada di subscription)
+    return routerId ? enriched.filter((c) => c.routerId === routerId) : enriched;
   }
 
   async findOne(id: string): Promise<Customer> {

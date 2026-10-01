@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,8 @@ interface RouterItem {
   name: string;
 }
 
+const PAGE_SIZE = 10;
+
 const STATUS_LABEL: Record<string, string> = {
   pending_verification: "Belum verifikasi email",
   pending_active: "Sudah bayar - menunggu approval",
@@ -39,6 +42,7 @@ export default function PendaftaranPage() {
   const [form, setForm] = useState({ routerId: "", pppoeUsername: "", pppoePassword: "", mikrotikProfile: "" });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [page, setPage] = useState(1);
 
   async function load() {
     setLoading(true);
@@ -102,6 +106,13 @@ export default function PendaftaranPage() {
     }
   }
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = useMemo(() => rows.slice(start, start + PAGE_SIZE), [rows, start]);
+  const showingFrom = rows.length === 0 ? 0 : start + 1;
+  const showingTo = Math.min(start + PAGE_SIZE, rows.length);
+
   return (
     <AdminLayout>
       <div className="mb-6 flex items-center justify-between">
@@ -116,24 +127,27 @@ export default function PendaftaranPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Menunggu Approval</CardTitle>
+          <CardTitle className="text-lg">
+            Menunggu Approval <span className="text-sm font-normal text-muted-foreground">({rows.length})</span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>No. Pelanggan</TableHead>
-                <TableHead>Nama</TableHead>
-                <TableHead>Kontak</TableHead>
-                <TableHead>Paket</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.subscriptionId}>
-                  <TableCell className="font-mono text-xs">{r.customerNumber}</TableCell>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="w-[130px]">No. Pelanggan</TableHead>
+                  <TableHead>Nama</TableHead>
+                  <TableHead className="w-[180px]">Kontak</TableHead>
+                  <TableHead className="w-[200px]">Paket</TableHead>
+                  <TableHead className="w-[180px]">Status</TableHead>
+                  <TableHead className="w-[170px] text-right">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((r) => (
+                  <TableRow key={r.subscriptionId} className="hover:bg-muted/40">
+                    <TableCell className="font-mono text-xs">{r.customerNumber}</TableCell>
                   <TableCell>
                     <div className="font-medium">{r.name}</div>
                     <div className="text-xs text-muted-foreground">{r.address ?? "-"}</div>
@@ -162,15 +176,31 @@ export default function PendaftaranPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {rows.length === 0 && !loading && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                    Tidak ada pendaftaran menunggu approval
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                {rows.length === 0 && !loading && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
+                      Tidak ada pendaftaran menunggu approval
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-sm text-muted-foreground">
+              Menampilkan {showingFrom}–{showingTo} dari {rows.length} pendaftaran
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" /> Sebelumnya
+              </Button>
+              <span className="text-sm text-muted-foreground">Halaman {currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+                Berikutnya <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

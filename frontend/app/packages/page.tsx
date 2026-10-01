@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Pencil, Server } from "lucide-react";
+import { Plus, Pencil, Server, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,8 @@ interface RouterItem {
   name: string;
 }
 
+const PAGE_SIZE = 10;
+
 const CYCLE_LABEL: Record<string, string> = {
   monthly: "Bulanan",
   quarterly: "3 Bulanan",
@@ -37,6 +39,7 @@ export default function PackagesPage() {
   const [packages, setPackages] = useState<Pkg[]>([]);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [routers, setRouters] = useState<RouterItem[]>([]);
+  const [page, setPage] = useState(1);
 
   // Modal edit paket
   const [editPkg, setEditPkg] = useState<Pkg | null>(null);
@@ -127,6 +130,13 @@ export default function PackagesPage() {
     }
   }
 
+  const totalPages = Math.max(1, Math.ceil(packages.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = useMemo(() => packages.slice(start, start + PAGE_SIZE), [packages, start]);
+  const showingFrom = packages.length === 0 ? 0 : start + 1;
+  const showingTo = Math.min(start + PAGE_SIZE, packages.length);
+
   return (
     <AdminLayout>
       <div className="mb-6 flex items-center justify-between">
@@ -148,25 +158,28 @@ export default function PackagesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Daftar Paket</CardTitle>
+          <CardTitle className="text-lg">
+            Daftar Paket <span className="text-sm font-normal text-muted-foreground">({packages.length})</span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nama</TableHead>
-                <TableHead>Kecepatan</TableHead>
-                <TableHead>Profile Router</TableHead>
-                <TableHead>Siklus</TableHead>
-                <TableHead className="text-right">Harga</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {packages.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.name}</TableCell>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead>Nama</TableHead>
+                  <TableHead className="w-[180px]">Kecepatan</TableHead>
+                  <TableHead className="w-[140px]">Profile Router</TableHead>
+                  <TableHead className="w-[110px]">Siklus</TableHead>
+                  <TableHead className="w-[130px] text-right">Harga</TableHead>
+                  <TableHead className="w-[100px]">Status</TableHead>
+                  <TableHead className="w-[150px] text-right">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((p) => (
+                  <TableRow key={p.id} className="hover:bg-muted/40">
+                    <TableCell className="font-medium">{p.name}</TableCell>
                   <TableCell>
                     <div>{p.speedMbps} Mbps</div>
                     <div className="text-[11px] text-muted-foreground">tampil: {p.displayDesc ?? "Cocok untuk beberapa perangkat"}</div>
@@ -197,15 +210,31 @@ export default function PackagesPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {packages.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                    Belum ada paket
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                {packages.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                      Belum ada paket
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-sm text-muted-foreground">
+              Menampilkan {showingFrom}–{showingTo} dari {packages.length} paket
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" /> Sebelumnya
+              </Button>
+              <span className="text-sm text-muted-foreground">Halaman {currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+                Berikutnya <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

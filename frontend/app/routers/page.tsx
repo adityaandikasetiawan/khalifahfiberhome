@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Wifi, WifiOff, TestTube } from "lucide-react";
+import { Plus, Wifi, WifiOff, TestTube, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,13 @@ interface RouterItem {
   notes?: string;
 }
 
+const PAGE_SIZE = 10;
+
 export default function RoutersPage() {
   const [routers, setRouters] = useState<RouterItem[]>([]);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { success: boolean; identity?: string; error?: string }>>({});
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.get("/routers").then((res) => setRouters(res.data.data));
@@ -47,6 +50,13 @@ export default function RoutersPage() {
     setRouters((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: false } : r)));
   }
 
+  const totalPages = Math.max(1, Math.ceil(routers.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = useMemo(() => routers.slice(start, start + PAGE_SIZE), [routers, start]);
+  const showingFrom = routers.length === 0 ? 0 : start + 1;
+  const showingTo = Math.min(start + PAGE_SIZE, routers.length);
+
   return (
     <AdminLayout>
       <div className="mb-6 flex items-center justify-between">
@@ -63,25 +73,28 @@ export default function RoutersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Daftar Router</CardTitle>
+          <CardTitle className="text-lg">
+            Daftar Router <span className="text-sm font-normal text-muted-foreground">({routers.length})</span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nama</TableHead>
-                <TableHead>Host</TableHead>
-                <TableHead>Port</TableHead>
-                <TableHead>TLS</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Koneksi</TableHead>
-                <TableHead className="text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {routers.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead>Nama</TableHead>
+                  <TableHead className="w-[160px]">Host</TableHead>
+                  <TableHead className="w-[90px]">Port</TableHead>
+                  <TableHead className="w-[80px]">TLS</TableHead>
+                  <TableHead className="w-[110px]">Status</TableHead>
+                  <TableHead className="w-[180px]">Koneksi</TableHead>
+                  <TableHead className="text-right">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((r) => (
+                  <TableRow key={r.id} className="hover:bg-muted/40">
+                    <TableCell className="font-medium">{r.name}</TableCell>
                   <TableCell className="font-mono text-sm">{r.host}</TableCell>
                   <TableCell>{r.port}</TableCell>
                   <TableCell>{r.useTls ? "Ya" : "Tidak"}</TableCell>
@@ -126,15 +139,31 @@ export default function RoutersPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {routers.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                    Belum ada router. Tambahkan router MikroTik pertama.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                {routers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                      Belum ada router. Tambahkan router MikroTik pertama.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-sm text-muted-foreground">
+              Menampilkan {showingFrom}–{showingTo} dari {routers.length} router
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" /> Sebelumnya
+              </Button>
+              <span className="text-sm text-muted-foreground">Halaman {currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+                Berikutnya <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </AdminLayout>

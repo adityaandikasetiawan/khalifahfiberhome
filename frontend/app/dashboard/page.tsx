@@ -42,6 +42,13 @@ const statusVariant = (status: string) => {
   }
 };
 
+const statusLabel: Record<string, string> = {
+  paid: "Lunas",
+  unpaid: "Belum Bayar",
+  overdue: "Jatuh Tempo",
+  cancelled: "Dibatalkan",
+};
+
 export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -168,7 +175,7 @@ export default function DashboardPage() {
                   <TableCell>{new Date(inv.dueDate).toLocaleDateString("id-ID")}</TableCell>
                   <TableCell className="text-right">Rp {Number(inv.totalAmount).toLocaleString("id-ID")}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(inv.status) as any}>{inv.status}</Badge>
+                    <Badge variant={statusVariant(inv.status) as any}>{statusLabel[inv.status] ?? inv.status}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     <Link href={`/invoices/${inv.id}`} className="text-sm text-primary hover:underline">
