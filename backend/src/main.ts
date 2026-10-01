@@ -1,4 +1,6 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -7,7 +9,13 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Serve file upload (gambar hero banner, dll) secara runtime di /uploads.
+  // Disimpan di backend/public/uploads sehingga tersedia tanpa rebuild frontend.
+  app.useStaticAssets(join(process.cwd(), 'public', 'uploads'), {
+    prefix: '/uploads/',
+  });
 
   // Diperlukan agar req.ip akurat (bukan IP Nginx) saat deploy di belakang
   // reverse proxy -- dipakai oleh WebhookIpWhitelistGuard. Aman diaktifkan

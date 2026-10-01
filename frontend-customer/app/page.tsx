@@ -78,24 +78,56 @@ const FAQS = [
   { q: "Apakah ada kontrak minimum?", a: "Tidak ada kontrak minimum. Anda bisa berlangganan bulanan dan berhenti kapan saja." },
 ];
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000/api/v1";
+const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+
 export default function HomePage() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [slides, setSlides] = useState<any[]>(HERO_SLIDES);
+
+  // Ambil hero_slides dari pengaturan situs. Jika ada, map ke struktur lokal
+  // (sekaligus membawa field `image` untuk banner). Fallback ke HERO_SLIDES.
+  useEffect(() => {
+    fetch(`${API_BASE}/site-settings/hero_slides`)
+      .then((r) => r.json())
+      .then((res) => {
+        const data = res?.data;
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data.map((s: any, i: number) => ({
+            badge: s.badge ?? "",
+            title: s.title ?? "",
+            highlight: s.highlight ?? "",
+            subtitle: s.subtitle ?? "",
+            desc: s.description ?? s.desc ?? "",
+            image: s.image || "",
+            cta: { text: s.ctaText || "Daftar Sekarang", href: s.ctaLink || "/daftar" },
+            ctaSecondary: { text: s.ctaSecondaryText || "Lihat Paket", href: s.ctaSecondaryLink || "/paket" },
+            bg: HERO_SLIDES[i % HERO_SLIDES.length].bg,
+            stat: { value: s.statValue ?? "", unit: s.statUnit ?? "", label: s.statLabel ?? "" },
+          }));
+          setSlides(mapped);
+          setCurrentSlide(0);
+        }
+      })
+      .catch(() => { /* pakai HERO_SLIDES default */ });
+  }, []);
 
   const nextSlide = useCallback(() => {
-    setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
-  }, []);
+    setCurrentSlide((prev) => (prev + 1) % slides.length);
+  }, [slides.length]);
 
   const prevSlide = useCallback(() => {
-    setCurrentSlide((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
-  }, []);
+    setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
+  }, [slides.length]);
 
   useEffect(() => {
     const timer = setInterval(nextSlide, 6000);
     return () => clearInterval(timer);
   }, [nextSlide]);
 
-  const slide = HERO_SLIDES[currentSlide];
+  const slide = slides[currentSlide] ?? slides[0];
+  const slideImg = (url?: string) => (!url ? "" : url.startsWith("http") ? url : `${SITE_BASE}${url}`);
 
   return (
     <>
@@ -105,6 +137,20 @@ export default function HomePage() {
       <section className="relative overflow-hidden min-h-[82vh] flex items-center">
         {/* Animated background */}
         <div className={`absolute inset-0 bg-gradient-to-br ${slide.bg} transition-all duration-1000`} />
+        {/* Foto banner (jika di-upload admin). Ringan: WebP + lazy, overlay agar teks terbaca */}
+        {slide.image && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={slideImg(slide.image)}
+              alt={slide.title || "Banner"}
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-background/92 via-background/70 to-background/30" />
+          </>
+        )}
         <div className="absolute inset-0 pointer-events-none">
           <div className="absolute top-20 left-[10%] h-72 w-72 rounded-full bg-primary/8 blur-3xl animate-float" />
           <div className="absolute bottom-20 right-[10%] h-56 w-56 rounded-full bg-secondary/10 blur-3xl animate-float-delayed" />
@@ -176,7 +222,7 @@ export default function HomePage() {
           {/* Slider controls */}
           <div className="flex items-center justify-between mt-12">
             <div className="flex gap-2">
-              {HERO_SLIDES.map((_, i) => (
+              {slides.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setCurrentSlide(i)}

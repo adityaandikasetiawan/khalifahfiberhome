@@ -49,3 +49,6 @@ backend/.wwebjs_cache/
 
 # Database backups (berisi data pelanggan / PII)
 db-backups/
+
+# Uploaded media (runtime, bukan bagian source)
+backend/public/uploads/

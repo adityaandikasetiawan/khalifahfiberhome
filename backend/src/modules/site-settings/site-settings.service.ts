@@ -1,14 +1,50 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const sharp = require('sharp');
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as crypto from 'crypto';
 import { SiteSetting } from './entities/site-setting.entity';
 
 @Injectable()
 export class SiteSettingsService {
+  private readonly logger = new Logger(SiteSettingsService.name);
+
+  // Disimpan di backend/public/uploads/hero dan di-serve runtime oleh backend
+  // di prefix /uploads (lihat main.ts useStaticAssets). Diakses via domain
+  // publik lewat nginx (location /uploads/ -> backend).
+  private readonly uploadDir =
+    process.env.HERO_UPLOAD_DIR ||
+    path.join(process.cwd(), 'public', 'uploads', 'hero');
+  private readonly publicBasePath = '/uploads/hero';
+
   constructor(
     @InjectRepository(SiteSetting)
     private readonly repo: Repository<SiteSetting>,
   ) {}
+
+  /**
+   * Simpan gambar sebagai WebP teroptimasi untuk hero slider.
+   * - resize lebar maks 1920px (tidak memperbesar), auto-rotate sesuai EXIF
+   * - kualitas 80, output .webp (ringan)
+   * Mengembalikan URL publik relatif (mis. /upload/hero/<id>.webp).
+   */
+  async saveImageAsWebp(buffer: Buffer): Promise<string> {
+    await fs.mkdir(this.uploadDir, { recursive: true });
+    const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.webp`;
+    const fullPath = path.join(this.uploadDir, filename);
+
+    await sharp(buffer)
+      .rotate()
+      .resize({ width: 1920, withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toFile(fullPath);
+
+    this.logger.log(`Hero image disimpan: ${fullPath}`);
+    return `${this.publicBasePath}/${filename}`;
+  }
 
   async getAll(): Promise<Record<string, any>> {
     const settings = await this.repo.find();

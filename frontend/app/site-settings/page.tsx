@@ -116,6 +116,8 @@ function CompanyForm({ data, onSave, saving }: { data: any; onSave: (v: any) => 
 
 function HeroSlidesForm({ data, onSave, saving }: { data: any; onSave: (v: any) => void; saving: boolean }) {
   const [slides, setSlides] = useState<any[]>(data || []);
+  const [uploading, setUploading] = useState<number | null>(null);
+  const [uploadErr, setUploadErr] = useState("");
   useEffect(() => { if (data) setSlides(data); }, [data]);
 
   function updateSlide(index: number, field: string, value: string) {
@@ -124,8 +126,33 @@ function HeroSlidesForm({ data, onSave, saving }: { data: any; onSave: (v: any) 
     setSlides(updated);
   }
 
+  async function handleUpload(index: number, file: File) {
+    setUploadErr("");
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadErr("Ukuran file maksimal 5 MB.");
+      return;
+    }
+    setUploading(index);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.post("/site-settings/upload-image", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      updateSlide(index, "image", res.data.data.url);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message ?? "Gagal upload gambar.";
+      setUploadErr(Array.isArray(msg) ? msg.join(", ") : msg);
+    } finally {
+      setUploading(null);
+    }
+  }
+
+  const mediaBase = (process.env.NEXT_PUBLIC_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+  const imgSrc = (url?: string) => (!url ? "" : url.startsWith("http") ? url : `${mediaBase}${url}`);
+
   function addSlide() {
-    setSlides([...slides, { badge: "", title: "", highlight: "", subtitle: "", description: "", ctaText: "Daftar Sekarang", ctaLink: "/daftar", ctaSecondaryText: "", ctaSecondaryLink: "", statValue: "", statUnit: "", statLabel: "" }]);
+    setSlides([...slides, { badge: "", title: "", highlight: "", subtitle: "", description: "", image: "", ctaText: "Daftar Sekarang", ctaLink: "/daftar", ctaSecondaryText: "", ctaSecondaryLink: "", statValue: "", statUnit: "", statLabel: "" }]);
   }
 
   function removeSlide(index: number) {
@@ -152,6 +179,35 @@ function HeroSlidesForm({ data, onSave, saving }: { data: any; onSave: (v: any) 
               <div><Label className="text-xs">Subtitle</Label><Input value={slide.subtitle || ""} onChange={(e) => updateSlide(i, "subtitle", e.target.value)} placeholder="Tanpa Batas" /></div>
             </div>
             <div><Label className="text-xs">Deskripsi</Label><textarea className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm" rows={2} value={slide.description || ""} onChange={(e) => updateSlide(i, "description", e.target.value)} /></div>
+
+            {/* Upload gambar banner */}
+            <div className="rounded-md border border-dashed p-3">
+              <Label className="text-xs">Gambar Banner (maks 5MB, otomatis dikonversi ke WebP)</Label>
+              <div className="mt-2 flex items-center gap-3">
+                {slide.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={imgSrc(slide.image)} alt={`Slide ${i + 1}`} className="h-16 w-28 rounded object-cover border" />
+                ) : (
+                  <div className="flex h-16 w-28 items-center justify-center rounded border bg-muted text-[10px] text-muted-foreground">Belum ada</div>
+                )}
+                <div className="flex flex-col gap-1">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(i, f); e.target.value = ""; }}
+                    className="text-xs"
+                    disabled={uploading === i}
+                  />
+                  {uploading === i && <span className="text-xs text-muted-foreground">Mengunggah &amp; mengonversi...</span>}
+                  {slide.image && (
+                    <button type="button" onClick={() => updateSlide(i, "image", "")} className="text-left text-xs text-destructive hover:underline">
+                      Hapus gambar
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label className="text-xs">Tombol Utama (teks)</Label><Input value={slide.ctaText || ""} onChange={(e) => updateSlide(i, "ctaText", e.target.value)} /></div>
               <div><Label className="text-xs">Tombol Utama (link)</Label><Input value={slide.ctaLink || ""} onChange={(e) => updateSlide(i, "ctaLink", e.target.value)} /></div>
@@ -165,6 +221,7 @@ function HeroSlidesForm({ data, onSave, saving }: { data: any; onSave: (v: any) 
             </div>
           </div>
         ))}
+        {uploadErr && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{uploadErr}</div>}
         <Button onClick={() => onSave(slides)} disabled={saving}><Save className="mr-2 h-4 w-4" />{saving ? "Menyimpan..." : "Simpan Semua Slide"}</Button>
       </CardContent>
     </Card>
