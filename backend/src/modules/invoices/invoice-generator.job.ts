@@ -110,4 +110,48 @@ export class InvoiceGeneratorJob {
       }
     }
   }
+
+  /**
+   * Cron INVOICE PERTAMA: terbitkan invoice awal untuk subscription AKTIF yang
+   * BELUM pernah punya invoice sama sekali (mis. pelanggan hasil import/migrasi
+   * yang belum pernah ditagih). Tanpa cron ini, pelanggan yang belum pernah
+   * bayar tidak akan tertagih karena renewal (getActiveUntil) hanya menagih
+   * yang sudah pernah bayar, dan cron bulanan periode-kalender dinonaktifkan.
+   *
+   * Guard:
+   *  - hanya subscription berbayar (harga paket > 0; komplimen/gratis dilewati)
+   *  - hanya jika startDate sudah tiba (<= hari ini); jangan tagih sebelum pasang
+   *  - hanya jika BELUM ada invoice apa pun (idempoten, tidak bikin dobel)
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  async handleFirstInvoiceGeneration() {
+    const subs = await this.subscriptionsService.findAllActive();
+    const now = new Date();
+    let issued = 0;
+
+    for (const sub of subs) {
+      try {
+        // Lewati paket gratis/komplimen (harga 0 atau tanpa paket).
+        const price = Number((sub as any).package?.price ?? 0);
+        if (price <= 0) continue;
+
+        // Jangan tagih sebelum masa aktif dimulai (startDate di masa depan).
+        if (sub.startDate && new Date(sub.startDate) > now) continue;
+
+        // Hanya untuk yang BELUM punya invoice sama sekali.
+        if (await this.invoicesService.hasAnyInvoice(sub.id)) continue;
+
+        const invoice = await this.invoicesService.generateMonthlyInvoiceForSubscription(sub);
+        await this.notificationsQueue.add("invoice_created", {
+          customerId: sub.customer.id,
+          invoiceId: invoice.id,
+        });
+        issued++;
+        this.logger.log(`Invoice PERTAMA dibuat untuk subscription ${sub.id} (${invoice.invoiceNumber})`);
+      } catch (err) {
+        this.logger.error(`Gagal buat invoice pertama subscription ${sub.id}`, err as Error);
+      }
+    }
+    this.logger.log(`Invoice pertama: ${issued} invoice baru diterbitkan`);
+  }
 }

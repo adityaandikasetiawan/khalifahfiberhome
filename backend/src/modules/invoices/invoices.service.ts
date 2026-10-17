@@ -56,27 +56,30 @@ export class InvoicesService {
     if (!dto.items.length) throw new BadRequestException("Invoice harus memiliki minimal 1 item");
 
     const now = new Date();
-    const dueDate = new Date(now);
-    dueDate.setDate(dueDate.getDate() + 7);
 
-    // Masa aktif invoice = 1 bulan penuh.
-    // Jika pelanggan sudah punya masa aktif berjalan (invoice lunas terakhir),
-    // periode baru menyambung dari situ; jika belum, mulai dari hari ini.
+    // Masa aktif invoice = 1 bulan kalender (konsisten dgn model "tgl bayar + 1
+    // bulan"). Prioritas periodStart:
+    //  1) invoiceDate dari admin (bila dikirim) -> admin menentukan tgl invoice
+    //  2) menyambung masa aktif berjalan (invoice lunas terakhir)
+    //  3) mulai hari ini
     const lastPaid = await this.invoiceRepo.findOne({
       where: { subscriptionId: subscription.id, status: "paid" as any },
       order: { periodEnd: "DESC" },
     });
 
     let periodStart: Date;
-    if (lastPaid?.periodEnd && new Date(lastPaid.periodEnd) >= now) {
+    if (dto.invoiceDate) {
+      periodStart = new Date(dto.invoiceDate);
+    } else if (lastPaid?.periodEnd && new Date(lastPaid.periodEnd) >= now) {
       periodStart = new Date(lastPaid.periodEnd);
       periodStart.setDate(periodStart.getDate() + 1);
     } else {
       periodStart = new Date(now);
     }
-    const periodEnd = new Date(periodStart);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
-    periodEnd.setDate(periodEnd.getDate() - 1);
+    const periodEnd = this.addOneCalendarMonth(periodStart);
+    // Jatuh tempo = akhir masa aktif (konsisten dgn kebijakan baru), BUKAN
+    // terbit + 7 hari. Pelanggan membayar untuk periode berjalan sampai tanggal ini.
+    const dueDate = new Date(periodEnd);
 
     const items = dto.items.map((i) =>
       this.itemRepo.create({ ...i, subtotal: i.qty * i.unitPrice }),
@@ -102,12 +105,25 @@ export class InvoicesService {
     // Kirim notifikasi "tagihan baru" ke pelanggan (WA + email), sama seperti
     // invoice yang dibuat otomatis oleh cron bulanan. Dibungkus try/catch agar
     // kegagalan enqueue tidak membatalkan pembuatan invoice.
+    // Jika admin menjadwalkan sendDate di masa depan, tunda pengiriman WA
+    // (BullMQ delay). Kosong / sudah lewat -> kirim sekarang.
+    let delayMs = 0;
+    if (dto.sendDate) {
+      const sendAt = new Date(dto.sendDate);
+      const diff = sendAt.getTime() - Date.now();
+      if (diff > 0) delayMs = diff;
+    }
     try {
       await this.notificationsQueue.add(
         "invoice_created",
         { customerId: subscription.customer?.id, invoiceId: saved.id },
-        { attempts: 5, backoff: { type: "exponential", delay: 30000 } },
+        { attempts: 5, backoff: { type: "exponential", delay: 30000 }, delay: delayMs },
       );
+      if (delayMs > 0) {
+        this.logger.log(
+          `Notifikasi invoice ${saved.invoiceNumber} dijadwalkan kirim ${new Date(dto.sendDate!).toISOString().split("T")[0]} (delay ${Math.round(delayMs / 3600000)} jam)`,
+        );
+      }
     } catch (err) {
       this.logger.error(`Gagal enqueue notifikasi invoice ${saved.invoiceNumber}: ${(err as Error).message}`);
     }
@@ -154,25 +170,25 @@ export class InvoicesService {
 
   async generateMonthlyInvoiceForSubscription(subscription: Subscription): Promise<Invoice> {
     const now = new Date();
-    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    // Model billing baru: masa aktif = hari ini s/d hari ini + 1 bulan kalender
+    // (BUKAN periode kalender 01-akhir bulan). Masa aktif final tetap dihitung
+    // ulang saat dibayar (markAsPaid = paidAt + 1 bulan).
+    const periodStart = new Date(now);
+    const periodEnd = this.addOneCalendarMonth(periodStart);
     // Jatuh tempo = akhir masa aktif (periodEnd), BUKAN terbit + 7 hari.
-    // Pelanggan membayar untuk periode berjalan sampai tanggal ini.
     const dueDate = new Date(periodEnd);
 
-    // Guard anti duplikat: kalau invoice untuk subscription + periode ini sudah
-    // ada (mis. cron jalan >1 instance, atau job ter-retry), kembalikan yang ada
-    // daripada membuat invoice ganda (mencegah pelanggan tertagih dobel).
+    // Guard anti duplikat: kalau subscription sudah punya invoice yang belum
+    // lunas / masih berjalan, jangan buat lagi (mencegah dobel saat cron
+    // ter-retry atau jalan >1 instance).
     const existing = await this.invoiceRepo
       .createQueryBuilder("invoice")
       .where("invoice.subscriptionId = :sid", { sid: subscription.id })
-      .andWhere("CAST(invoice.periodStart AS DATE) = :ps", {
-        ps: periodStart.toISOString().split("T")[0],
-      })
+      .andWhere("invoice.status IN (:...st)", { st: ["unpaid", "overdue"] })
       .getOne();
     if (existing) {
       this.logger.warn(
-        `Invoice periode ${periodStart.toISOString().split("T")[0]} untuk subscription ${subscription.id} sudah ada (${existing.invoiceNumber}), skip pembuatan ganda`,
+        `Subscription ${subscription.id} sudah punya invoice belum lunas (${existing.invoiceNumber}), skip pembuatan ganda`,
       );
       return existing;
     }
@@ -208,6 +224,12 @@ export class InvoicesService {
       order: { periodEnd: "DESC" },
     });
     return paid?.periodEnd ? new Date(paid.periodEnd) : null;
+  }
+
+  /** True jika subscription sudah pernah punya invoice (apa pun statusnya). */
+  async hasAnyInvoice(subscriptionId: string): Promise<boolean> {
+    const n = await this.invoiceRepo.count({ where: { subscriptionId } });
+    return n > 0;
   }
 
   /**

@@ -64,6 +64,8 @@ export default function InvoicesPage() {
   const [subSearch, setSubSearch] = useState(""); // teks pencarian pelanggan
   const [subOpen, setSubOpen] = useState(false); // tampilkan dropdown hasil
   const [items, setItems] = useState<ItemForm[]>([{ description: "", qty: 1, unitPrice: 0 }]);
+  const [invoiceDate, setInvoiceDate] = useState(""); // tgl mulai/terbit invoice
+  const [sendDate, setSendDate] = useState(""); // jadwal kirim WA (kosong = sekarang)
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -152,6 +154,8 @@ export default function InvoicesPage() {
     setSubSearch("");
     setSubOpen(false);
     setItems([{ description: "", qty: 1, unitPrice: 0 }]);
+    setInvoiceDate("");
+    setSendDate("");
     setFormErr("");
   };
 
@@ -172,9 +176,17 @@ export default function InvoicesPage() {
       setFormErr("Minimal 1 item dengan deskripsi harus diisi");
       return;
     }
+    // Validasi: jadwal kirim tidak boleh sebelum tanggal invoice.
+    if (invoiceDate && sendDate && sendDate < invoiceDate) {
+      setFormErr("Tanggal kirim WA tidak boleh sebelum tanggal invoice");
+      return;
+    }
     setSaving(true);
     try {
-      await api.post("/invoices", { subscriptionId: subId, items: cleanItems });
+      const payload: any = { subscriptionId: subId, items: cleanItems };
+      if (invoiceDate) payload.invoiceDate = invoiceDate;
+      if (sendDate) payload.sendDate = sendDate;
+      await api.post("/invoices", payload);
       setShowCreate(false);
       resetForm();
       loadInvoices();
@@ -372,6 +384,33 @@ export default function InvoicesPage() {
                     </div>
                   </>
                 )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Tanggal Invoice</label>
+                  <input
+                    type="date"
+                    value={invoiceDate}
+                    onChange={(e) => setInvoiceDate(e.target.value)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Awal masa aktif. Jatuh tempo = +1 bulan. Kosong = hari ini.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Jadwal Kirim WA</label>
+                  <input
+                    type="date"
+                    value={sendDate}
+                    onChange={(e) => setSendDate(e.target.value)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Tagihan dikirim via WA pada tanggal ini. Kosong = kirim sekarang.
+                  </p>
+                </div>
               </div>
 
               <div>
