@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags, ApiOperation } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -85,6 +85,15 @@ export class MikrotikController {
   @Roles("super_admin", "technician")
   getActiveConnections(@Param("id") id: string) {
     return this.mikrotikService.getActiveConnections(id);
+  }
+
+  @Post("reconcile-activations")
+  @ApiOperation({
+    summary: "Rekonsiliasi: enable PPPoE pelanggan active-di-billing yg masih disabled di router (?dryRun=1 utk cek saja)",
+  })
+  @Roles("super_admin", "technician")
+  reconcileActivations(@Query("dryRun") dryRun?: string) {
+    return this.mikrotikService.reconcileActivations(dryRun === "1" || dryRun === "true");
   }
 
   @Post(":id/import-pppoe")

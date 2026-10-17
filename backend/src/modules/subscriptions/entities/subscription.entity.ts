@@ -30,6 +30,9 @@ export class Subscription {
   @Column({ type: "int", comment: "Tanggal jatuh tempo tiap bulan, 1-28" })
   billingDay: number;
 
+  @Column({ type: "decimal", precision: 12, scale: 2, default: 0, comment: "Potongan/subsidi tetap per bulan (mis. donasi). Tagihan = harga paket - diskon" })
+  discount: number;
+
   @Column({ type: "enum", enum: ["active", "suspended", "cancelled", "pending_activation"], default: "active" })
   status: SubscriptionStatus;
 

@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { BullModule } from "@nestjs/bullmq";
 import { Payment } from "./entities/payment.entity";
+import { Router } from "../mikrotik/entities/router.entity";
 import { PaymentsService } from "./payments.service";
 import { PaymentsController } from "./payments.controller";
 import { PaymentWebhookController } from "./webhooks/payment-webhook.controller";
@@ -12,7 +13,7 @@ import { InvoicesModule } from "../invoices/invoices.module";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Payment]),
+    TypeOrmModule.forFeature([Payment, Router]),
     BullModule.registerQueue({ name: "notifications" }, { name: "isolir" }),
     InvoicesModule,
   ],

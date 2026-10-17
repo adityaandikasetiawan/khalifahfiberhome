@@ -1,14 +1,22 @@
 import { Controller, Get, Post, Body, Param, Query, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
-import { IsIn } from "class-validator";
+import { IsIn, IsOptional, IsString } from "class-validator";
 import { PaymentsService } from "./payments.service";
 import { CreatePaymentTransactionDto } from "./dto/create-payment.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
 
 class SimulateOutcomeDto {
   @IsIn(["success", "failed"])
   outcome: "success" | "failed";
+}
+
+class ManualPaymentDto {
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 @ApiTags("payments")
@@ -17,6 +25,16 @@ class SimulateOutcomeDto {
 @Controller("payments")
 export class PaymentsController {
   constructor(private readonly service: PaymentsService) {}
+
+  @Post("manual/:invoiceId")
+  @UseGuards(RolesGuard)
+  @Roles("super_admin", "finance")
+  @ApiOperation({
+    summary: "Pembayaran MANUAL (bypass gateway) oleh admin -> invoice lunas + aktivasi otomatis",
+  })
+  recordManualPayment(@Param("invoiceId") invoiceId: string, @Body() dto: ManualPaymentDto) {
+    return this.service.recordManualPayment(invoiceId, dto?.note);
+  }
 
   @Post("create-transaction")
   @ApiOperation({ summary: "Buat transaksi pembayaran (VA/QRIS/e-wallet) untuk sebuah invoice" })

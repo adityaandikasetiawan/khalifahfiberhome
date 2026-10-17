@@ -71,6 +71,15 @@ export class CustomersService {
     const routers = await this.repo.manager.query(`SELECT id, name FROM routers`);
     const routerMap = new Map<string, string>(routers.map((r: any) => [r.id, r.name]));
 
+    // Masa aktif = periodEnd invoice LUNAS terakhir per subscription (1 query agregat).
+    const activeRows = await this.repo.manager.query(
+      `SELECT subscription_id AS sid, MAX("periodEnd") AS active_until
+       FROM invoices WHERE status = 'paid' GROUP BY subscription_id`,
+    );
+    const activeMap = new Map<string, string>(
+      activeRows.map((r: any) => [r.sid, r.active_until]),
+    );
+
     const enriched = customers.map((c) => {
       const sub = c.subscriptions?.[0];
       const rId = sub?.routerId ?? null;
@@ -80,6 +89,7 @@ export class CustomersService {
         routerName: rId ? routerMap.get(rId) ?? null : null,
         packageName: sub?.package?.name ?? null,
         pppoeUsername: sub?.pppoeUsername ?? null,
+        activeUntil: sub?.id ? activeMap.get(sub.id) ?? null : null,
       };
     });
 
@@ -126,6 +136,10 @@ export class CustomersService {
     const prevPhone = (customer.phone ?? "").trim();
 
     Object.assign(customer, dto);
+    // Normalisasi email kosong ("") menjadi null agar konsisten di DB.
+    if (typeof customer.email === "string" && customer.email.trim() === "") {
+      customer.email = null as any;
+    }
     const saved = await this.repo.save(customer);
 
     const newEmail = (saved.email ?? "").trim();

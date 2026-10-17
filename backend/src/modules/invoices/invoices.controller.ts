@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Patch } from "@nestjs/common";
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Patch, Res } from "@nestjs/common";
+import { Response } from "express";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { InvoicesService } from "./invoices.service";
+import { InvoicePdfService } from "./invoice-pdf.service";
 import { CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -11,7 +13,10 @@ import { Roles } from "../../common/decorators/roles.decorator";
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("invoices")
 export class InvoicesController {
-  constructor(private readonly service: InvoicesService) {}
+  constructor(
+    private readonly service: InvoicesService,
+    private readonly pdfService: InvoicePdfService,
+  ) {}
 
   @Post()
   @Roles("super_admin", "finance")
@@ -30,6 +35,19 @@ export class InvoicesController {
   @ApiOperation({ summary: "Ringkasan invoice untuk dashboard" })
   getSummary() {
     return this.service.getSummary();
+  }
+
+  @Get(":id/pdf")
+  @ApiOperation({ summary: "Download invoice sebagai PDF (dengan logo & kop perusahaan)" })
+  async downloadPdf(@Param("id") id: string, @Res() res: Response) {
+    const invoice = await this.service.findOne(id);
+    const buffer = await this.pdfService.generate(invoice);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${invoice.invoiceNumber}.pdf"`,
+      "Content-Length": String(buffer.length),
+    });
+    res.send(buffer);
   }
 
   @Get(":id")

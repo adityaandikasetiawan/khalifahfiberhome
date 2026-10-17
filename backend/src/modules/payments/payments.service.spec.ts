@@ -5,6 +5,7 @@ import { NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PaymentsService } from "./payments.service";
 import { Payment } from "./entities/payment.entity";
+import { Router } from "../mikrotik/entities/router.entity";
 import { InvoicesService } from "../invoices/invoices.service";
 import { MidtransProvider } from "./gateways/midtrans.provider";
 import { IpaymuProvider } from "./gateways/ipaymu.provider";
@@ -26,6 +27,9 @@ describe("PaymentsService - webhook idempotency", () => {
     find: jest.fn(),
   };
 
+  // Router repo untuk lookup nama router (alert admin). Default: tidak ketemu.
+  const mockRouterRepo = { findOne: jest.fn().mockResolvedValue(null) };
+
   const mockInvoicesService = {
     findOne: jest.fn(),
     markAsPaid: jest.fn(),
@@ -46,6 +50,7 @@ describe("PaymentsService - webhook idempotency", () => {
       providers: [
         PaymentsService,
         { provide: getRepositoryToken(Payment), useValue: mockPaymentRepo },
+        { provide: getRepositoryToken(Router), useValue: mockRouterRepo },
         { provide: InvoicesService, useValue: mockInvoicesService },
         { provide: MidtransProvider, useValue: mockMidtransProvider },
         { provide: IpaymuProvider, useValue: mockIpaymuProvider },
@@ -134,7 +139,7 @@ describe("PaymentsService - webhook idempotency", () => {
     );
   });
 
-  it("TIDAK membuat tugas aktivasi jika subscription memang masih aktif (bukan hasil isolir)", async () => {
+  it("membuat tugas aktivasi (idempoten) juga saat subscription sudah active -- memastikan PPPoE enabled", async () => {
     const payment = { id: "pay-3", invoiceId: "inv-3", status: "pending" };
     mockPaymentRepo.findOne.mockResolvedValue(payment);
     mockPaymentRepo.save.mockImplementation((p) => Promise.resolve(p));
@@ -146,7 +151,14 @@ describe("PaymentsService - webhook idempotency", () => {
 
     await service.handleWebhook({ gatewayReference: "ORDER-3", status: "success", rawPayload: {} });
 
-    expect(mockIsolirQueue.add).not.toHaveBeenCalled();
+    // Pelanggan "active" di billing bisa saja PPPoE-nya ter-disable di router
+    // (isolir manual / status tak sinkron). Enable PPPoE idempoten, jadi aktivasi
+    // tetap dipicu untuk memastikan layanan hidup setelah bayar.
+    expect(mockIsolirQueue.add).toHaveBeenCalledWith(
+      "activate",
+      expect.objectContaining({ subscriptionId: "sub-3", invoiceId: "inv-3" }),
+      expect.objectContaining({ attempts: expect.any(Number) }),
+    );
   });
 
   it("payment gagal (failed/expired) tidak menandai invoice lunas", async () => {

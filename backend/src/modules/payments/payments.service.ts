@@ -5,6 +5,7 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { ConfigService } from "@nestjs/config";
 import { Payment } from "./entities/payment.entity";
+import { Router } from "../mikrotik/entities/router.entity";
 import { InvoicesService } from "../invoices/invoices.service";
 import { MidtransProvider } from "./gateways/midtrans.provider";
 import { IpaymuProvider } from "./gateways/ipaymu.provider";
@@ -16,6 +17,7 @@ export class PaymentsService {
 
   constructor(
     @InjectRepository(Payment) private readonly repo: Repository<Payment>,
+    @InjectRepository(Router) private readonly routerRepo: Repository<Router>,
     private readonly invoicesService: InvoicesService,
     private readonly midtransProvider: MidtransProvider,
     private readonly ipaymuProvider: IpaymuProvider,
@@ -23,6 +25,17 @@ export class PaymentsService {
     @InjectQueue("notifications") private readonly notificationsQueue: Queue,
     @InjectQueue("isolir") private readonly isolirQueue: Queue,
   ) {}
+
+  /** Ambil nama router dari routerId subscription (untuk alert admin). */
+  private async getRouterName(routerId?: string): Promise<string | undefined> {
+    if (!routerId) return undefined;
+    try {
+      const router = await this.routerRepo.findOne({ where: { id: routerId } });
+      return router?.name;
+    } catch {
+      return undefined;
+    }
+  }
 
   async createTransaction(dto: CreatePaymentTransactionDto) {
     const invoice = await this.invoicesService.findOne(dto.invoiceId);
@@ -167,6 +180,7 @@ export class PaymentsService {
       // Nomor admin dari env ADMIN_WA_NUMBER (dukung beberapa nomor, pisah koma).
       const adminWa = this.config.get<string>("ADMIN_WA_NUMBER", "");
       if (adminWa) {
+        const routerName = await this.getRouterName(invoice.subscription?.routerId);
         await this.notificationsQueue.add(
           "admin_payment_alert",
           {
@@ -176,6 +190,7 @@ export class PaymentsService {
             invoiceNumber: invoice.invoiceNumber,
             customerName: invoice.subscription?.customer?.name,
             customerNumber: invoice.subscription?.customer?.customerNumber,
+            routerName,
             paidAt: new Date().toISOString(),
           },
           { attempts: 5, backoff: { type: "exponential", delay: 30000 } },
@@ -195,9 +210,13 @@ export class PaymentsService {
         this.logger.log(
           `Pembayaran registrasi pelanggan baru (sub ${subscription.id}) diterima -> menunggu approval teknisi`,
         );
-      } else if (subscription?.status === "suspended") {
-        // PELANGGAN LAMA yang tersuspend karena tunggakan -> aktivasi OTOMATIS
-        // ke router (enable PPPoE) via queue isolir. Retry ditangani BullMQ.
+      } else if (subscription?.status === "suspended" || subscription?.status === "active") {
+        // PELANGGAN EXISTING bayar -> PASTIKAN PPPoE enabled di router.
+        // Dulu hanya status "suspended" yang memicu aktivasi; akibatnya pelanggan
+        // yang statusnya "active" di billing TAPI PPPoE-nya masih ter-disable di
+        // router (mis. diisolir manual, atau status billing tak sinkron) tetap
+        // mati walau sudah bayar. Enable PPPoE itu idempoten (aman walau sudah
+        // enabled), jadi selalu jalankan untuk memastikan layanan hidup.
         await this.isolirQueue.add(
           "activate",
           { subscriptionId: invoice.subscriptionId, invoiceId: invoice.id },
@@ -276,6 +295,44 @@ export class PaymentsService {
 
   findByInvoice(invoiceId: string) {
     return this.repo.find({ where: { invoiceId }, order: { createdAt: "DESC" } });
+  }
+
+  /**
+   * PEMBAYARAN MANUAL (bypass gateway) oleh admin.
+   * Dipakai saat pelanggan membayar via transfer/cash manual: admin menandai
+   * invoice lunas, dan sistem memproses SEPERTI pembayaran gateway sukses —
+   * mencatat payment, menandai invoice lunas, memicu AKTIVASI OTOMATIS PPPoE
+   * (jika subscription suspended), serta mengirim notifikasi + alert admin.
+   *
+   * @param note catatan opsional (mis. "Transfer BCA 7 Okt a/n Budi")
+   */
+  async recordManualPayment(invoiceId: string, note?: string) {
+    const invoice = await this.invoicesService.findOne(invoiceId);
+    if (invoice.status === "paid") {
+      throw new BadRequestException("Invoice sudah lunas");
+    }
+
+    const gatewayReference = `MANUAL-${invoice.invoiceNumber}-${Date.now().toString().slice(-6)}`;
+    const payment = this.repo.create({
+      invoiceId: invoice.id,
+      paymentMethod: "bank_transfer",
+      gatewayReference,
+      amount: invoice.totalAmount,
+      status: "pending",
+      rawPayload: { manual: true, note: note ?? "Pembayaran manual oleh admin", at: new Date().toISOString() },
+    });
+    await this.repo.save(payment);
+
+    // Proses lewat jalur yang sama persis dgn pembayaran gateway sukses:
+    // -> markAsPaid + payment_success + alert admin + aktivasi otomatis.
+    await this.handleWebhook({
+      gatewayReference,
+      status: "success",
+      rawPayload: { manual: true, note: note ?? null },
+    });
+
+    this.logger.log(`Pembayaran MANUAL dicatat utk invoice ${invoice.invoiceNumber} (${gatewayReference})`);
+    return { invoiceNumber: invoice.invoiceNumber, status: "paid", gatewayReference };
   }
 
   /**

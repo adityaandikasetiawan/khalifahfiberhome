@@ -5,18 +5,16 @@ import { InvoicesService } from "./invoices.service";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 
 /**
- * Test untuk InvoiceGeneratorJob.handleDailyInvoiceGeneration.
+ * Test untuk InvoiceGeneratorJob.
  *
- * Fokus: guard `startDate`. Ini area sensitif komplain pelanggan:
- *  - jika terlalu longgar -> pelanggan ditagih sebelum masa aktif (komplain "kok sudah ditagih?")
- *  - jika terlalu ketat  -> pelanggan yang seharusnya ditagih terlewat (kehilangan pendapatan)
+ * Sejak model billing diubah menjadi "masa aktif = tanggal bayar + 1 bulan",
+ * cron bulanan periode-kalender (handleDailyInvoiceGeneration) DINONAKTIFKAN
+ * karena membuat invoice dobel dengan jalur renewal. Perpanjangan ditangani
+ * oleh handleRenewalGeneration (H-3 sebelum masa aktif habis).
  *
  * Kontrak yang dikunci:
- *  1. startDate di masa depan  => TIDAK generate invoice, TIDAK kirim notifikasi.
- *  2. startDate sudah lewat     => generate invoice + kirim notifikasi.
- *  3. startDate == hari ini     => tetap ditagih (batas pakai '>' bukan '>=').
- *  4. tanpa startDate           => ditagih (kompatibel data lama).
- *  5. error pada 1 subscription => tidak menghentikan proses subscription lain.
+ *  1. handleDailyInvoiceGeneration TIDAK pernah membuat invoice / notifikasi
+ *     (apa pun subscription yang jatuh tempo hari ini) -> cegah invoice hantu.
  */
 describe("InvoiceGeneratorJob", () => {
   let job: InvoiceGeneratorJob;
@@ -65,9 +63,12 @@ describe("InvoiceGeneratorJob", () => {
     return d;
   };
 
-  it("TIDAK menagih ketika startDate masih di masa depan", async () => {
+  it("handleDailyInvoiceGeneration DINONAKTIFKAN: tidak membuat invoice walau ada subscription jatuh tempo (cegah invoice hantu)", async () => {
+    // Walaupun ada subscription yang 'jatuh tempo hari ini', cron ini tidak
+    // boleh menagih apa pun karena perpanjangan ditangani cron renewal.
     mockSubscriptionsService.findActiveDueToday.mockResolvedValue([
-      makeSub({ id: "future", startDate: daysFromNow(7) }),
+      makeSub({ id: "due-1", startDate: daysFromNow(-30), customerId: "c1" }),
+      makeSub({ id: "due-2", startDate: null, customerId: "c2" }),
     ]);
 
     await job.handleDailyInvoiceGeneration();
@@ -76,74 +77,8 @@ describe("InvoiceGeneratorJob", () => {
     expect(mockNotificationsQueue.add).not.toHaveBeenCalled();
   });
 
-  it("menagih + mengirim notifikasi ketika startDate sudah lewat", async () => {
-    const sub = makeSub({ id: "past", startDate: daysFromNow(-30), customerId: "cust-past" });
-    mockSubscriptionsService.findActiveDueToday.mockResolvedValue([sub]);
-    mockInvoicesService.generateMonthlyInvoiceForSubscription.mockResolvedValue({ id: "inv-1" });
-
-    await job.handleDailyInvoiceGeneration();
-
-    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).toHaveBeenCalledWith(sub);
-    expect(mockNotificationsQueue.add).toHaveBeenCalledWith("invoice_created", {
-      customerId: "cust-past",
-      invoiceId: "inv-1",
-    });
-  });
-
-  it("menagih ketika startDate == hari ini (batas '>' bukan '>=')", async () => {
-    const sub = makeSub({ id: "today", startDate: new Date() });
-    mockSubscriptionsService.findActiveDueToday.mockResolvedValue([sub]);
-    mockInvoicesService.generateMonthlyInvoiceForSubscription.mockResolvedValue({ id: "inv-today" });
-
-    await job.handleDailyInvoiceGeneration();
-
-    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).toHaveBeenCalledWith(sub);
-    expect(mockNotificationsQueue.add).toHaveBeenCalledTimes(1);
-  });
-
-  it("menagih ketika subscription tidak punya startDate (kompatibel data lama)", async () => {
-    const sub = makeSub({ id: "nostart", startDate: null });
-    mockSubscriptionsService.findActiveDueToday.mockResolvedValue([sub]);
-    mockInvoicesService.generateMonthlyInvoiceForSubscription.mockResolvedValue({ id: "inv-x" });
-
-    await job.handleDailyInvoiceGeneration();
-
-    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).toHaveBeenCalledWith(sub);
-    expect(mockNotificationsQueue.add).toHaveBeenCalledTimes(1);
-  });
-
-  it("hanya menagih yang startDate-nya sudah tiba dari campuran (tidak ada yang kelewat, tidak ada yang dini)", async () => {
-    const subFuture = makeSub({ id: "f", startDate: daysFromNow(5), customerId: "cf" });
-    const subDue = makeSub({ id: "d", startDate: daysFromNow(-1), customerId: "cd" });
-    mockSubscriptionsService.findActiveDueToday.mockResolvedValue([subFuture, subDue]);
-    mockInvoicesService.generateMonthlyInvoiceForSubscription.mockResolvedValue({ id: "inv-d" });
-
-    await job.handleDailyInvoiceGeneration();
-
-    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).toHaveBeenCalledTimes(1);
-    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).toHaveBeenCalledWith(subDue);
-    expect(mockNotificationsQueue.add).toHaveBeenCalledWith("invoice_created", {
-      customerId: "cd",
-      invoiceId: "inv-d",
-    });
-  });
-
-  it("error pada satu subscription tidak menghentikan penagihan subscription lain", async () => {
-    const subA = makeSub({ id: "A", startDate: daysFromNow(-10), customerId: "ca" });
-    const subB = makeSub({ id: "B", startDate: daysFromNow(-10), customerId: "cb" });
-    mockSubscriptionsService.findActiveDueToday.mockResolvedValue([subA, subB]);
-    mockInvoicesService.generateMonthlyInvoiceForSubscription
-      .mockRejectedValueOnce(new Error("db error"))
-      .mockResolvedValueOnce({ id: "inv-B" });
-
-    await job.handleDailyInvoiceGeneration();
-
-    // A gagal, B tetap diproses & dikirim
-    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).toHaveBeenCalledTimes(2);
-    expect(mockNotificationsQueue.add).toHaveBeenCalledTimes(1);
-    expect(mockNotificationsQueue.add).toHaveBeenCalledWith("invoice_created", {
-      customerId: "cb",
-      invoiceId: "inv-B",
-    });
+  it("handleDailyInvoiceGeneration tidak error walau tidak ada data (no-op aman)", async () => {
+    await expect(job.handleDailyInvoiceGeneration()).resolves.toBeUndefined();
+    expect(mockInvoicesService.generateMonthlyInvoiceForSubscription).not.toHaveBeenCalled();
   });
 });

@@ -9,10 +9,11 @@ import { MikrotikService } from "./mikrotik.service";
 import { MikrotikImportService } from "./mikrotik-import.service";
 import { CredentialVaultService } from "./credential-vault.service";
 import { MikrotikController } from "./mikrotik.controller";
+import { ReactivationSchedulerJob } from "./reactivation-scheduler.job";
 
 @Module({
   imports: [TypeOrmModule.forFeature([Router, Customer, Subscription, Package])],
-  providers: [MikrotikApiService, MikrotikService, MikrotikImportService, CredentialVaultService],
+  providers: [MikrotikApiService, MikrotikService, MikrotikImportService, CredentialVaultService, ReactivationSchedulerJob],
   controllers: [MikrotikController],
   exports: [MikrotikService],
 })

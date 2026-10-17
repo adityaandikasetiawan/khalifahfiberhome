@@ -137,13 +137,23 @@ export class NotificationsProcessor extends WorkerHost {
     const base = process.env.PORTAL_BASE_URL ?? "";
 
     const periodStart = (invoice as any).periodStart;
+    // Waktu pembayaran (paidAt) diformat WIB -- untuk notifikasi payment_success.
+    const paidAt = (invoice as any).paidAt
+      ? new Date((invoice as any).paidAt).toLocaleString("id-ID", {
+          dateStyle: "medium",
+          timeStyle: "short",
+          timeZone: "Asia/Jakarta",
+        })
+      : undefined;
+
     const context = {
       customerName: customer.name,
       invoiceNumber: invoice.invoiceNumber,
       amount: Number(invoice.totalAmount).toLocaleString("id-ID"),
-      dueDate: new Date(invoice.dueDate).toLocaleDateString("id-ID"),
+      paidAt,
+      dueDate: new Date(invoice.dueDate).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" }),
       period: periodStart
-        ? new Date(periodStart).toLocaleDateString("id-ID", { month: "long", year: "numeric" })
+        ? new Date(periodStart).toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "Asia/Jakarta" })
         : undefined,
       paymentLink: `${base}/bayar?token=${payToken}`,
       resetPassword, // undefined jika pelanggan sudah punya password

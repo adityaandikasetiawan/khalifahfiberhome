@@ -34,4 +34,9 @@ export class CreateRouterDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiPropertyOptional({ default: true, description: "Aktif/nonaktifkan router" })
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

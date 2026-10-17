@@ -81,15 +81,39 @@ export default function RouterDetailPage() {
     setLoadingConns(false);
   }
 
+  const [saveError, setSaveError] = useState("");
+
   async function handleSave() {
     setSaving(true);
+    setSaveError("");
     try {
-      const { id, createdAt, updatedAt, ...dto } = form;
+      // Kirim HANYA field yang boleh diubah (hindari field read-only seperti
+      // isActive/id/timestamps yang ditolak validasi backend).
+      const dto: any = {
+        name: form.name,
+        host: form.host,
+        port: Number(form.port),
+        username: form.username,
+        useTls: !!form.useTls,
+        notes: form.notes ?? "",
+      };
+      // Password hanya dikirim jika admin benar-benar mengetik yang baru.
+      // Nilai yang dimuat dari server adalah versi tersamar (mask), jadi
+      // jangan dikirim ulang agar password asli tidak tertimpa.
+      if (form.password && form.password !== router.password && !/•|\*{3,}/.test(form.password)) {
+        dto.password = form.password;
+      }
       await api.patch(`/routers/${params.id}`, dto);
-      setRouter(form);
+      // Perbarui tampilan dengan data terbaru dari server (nama, dll).
+      const fresh = await api.get(`/routers/${params.id}`);
+      setRouter(fresh.data.data);
+      setForm(fresh.data.data);
       setEditing(false);
-    } catch {}
-    setSaving(false);
+    } catch (err: any) {
+      setSaveError(err?.response?.data?.message ?? "Gagal menyimpan perubahan router");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!router) {
@@ -141,6 +165,9 @@ export default function RouterDetailPage() {
             <CardTitle className="text-lg">Edit Router</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {saveError && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{saveError}</div>
+            )}
             <div className="space-y-2">
               <Label>Nama</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

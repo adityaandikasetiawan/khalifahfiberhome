@@ -211,6 +211,14 @@ function BayarInner() {
               </select>
             </div>
 
+            {paymentMethod === "qris" && (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/payment_gateway/qris.png" alt="QRIS" loading="lazy" className="h-10 w-auto object-contain" />
+                <span className="text-xs text-muted-foreground">Scan dengan aplikasi e-wallet / m-banking apa pun yang mendukung QRIS.</span>
+              </div>
+            )}
+
             {paymentMethod === "va" && (
               <div className="mt-3">
                 <label className="text-sm font-medium">Pilih Bank</label>

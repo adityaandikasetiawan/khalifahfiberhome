@@ -71,7 +71,7 @@ const NAV: NavEntry[] = [
     icon: Radio,
     children: [
       { href: "/broadcast", label: "Broadcast", icon: Megaphone },
-      { href: "/whatsapp", label: "WhatsApp Gateway", icon: MessageCircle },
+      { href: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
     ],
   },
   { href: "/tickets", label: "Tiket Gangguan", icon: MessageSquare },

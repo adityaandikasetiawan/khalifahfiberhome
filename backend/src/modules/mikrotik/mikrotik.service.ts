@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Router } from "./entities/router.entity";
+import { Subscription } from "../subscriptions/entities/subscription.entity";
 import { MikrotikApiService } from "./mikrotik-api.service";
 import { CredentialVaultService } from "./credential-vault.service";
 import { CreateRouterDto } from "./dto/create-router.dto";
@@ -13,9 +14,65 @@ export class MikrotikService {
 
   constructor(
     @InjectRepository(Router) private readonly routerRepo: Repository<Router>,
+    @InjectRepository(Subscription) private readonly subscriptionRepo: Repository<Subscription>,
     private readonly mikrotikApi: MikrotikApiService,
     private readonly vault: CredentialVaultService,
   ) {}
+
+  /**
+   * REKONSILIASI AKTIVASI: cari pelanggan yang di billing berstatus "active"
+   * tetapi PPPoE-nya masih DISABLED di router (mis. akibat isolir manual atau
+   * status tak sinkron), lalu ENABLE kembali. Mengatasi keluhan "sudah bayar
+   * tapi belum aktif". Idempoten & aman dijalankan berulang.
+   *
+   * @param dryRun jika true, hanya laporkan tanpa mengubah router.
+   */
+  async reconcileActivations(dryRun = false): Promise<{
+    router: string;
+    activeBilling: number;
+    disabledDiRouter: number;
+    diperbaiki: { pppoeUsername: string }[];
+  }[]> {
+    const routers = await this.routerRepo.find({ where: { isActive: true } });
+    const result: any[] = [];
+
+    for (const router of routers) {
+      const decrypted = { ...router, password: this.vault.decrypt(router.password) } as Router;
+      let secrets: { name: string; disabled: boolean }[] = [];
+      try {
+        secrets = await this.mikrotikApi.getPppoeSecrets(decrypted);
+      } catch (e) {
+        this.logger.error(`Reconcile: gagal ambil secrets ${router.name}: ${(e as Error).message}`);
+        result.push({ router: router.name, activeBilling: 0, disabledDiRouter: 0, diperbaiki: [], error: (e as Error).message });
+        continue;
+      }
+      const disabledSet = new Set(secrets.filter((s) => s.disabled).map((s) => s.name));
+
+      const activeSubs = await this.subscriptionRepo.find({
+        where: { routerId: router.id, status: "active" as any },
+      });
+
+      const fixed: { pppoeUsername: string }[] = [];
+      for (const sub of activeSubs) {
+        if (sub.pppoeUsername && disabledSet.has(sub.pppoeUsername)) {
+          if (!dryRun) {
+            const ok = await this.mikrotikApi.enablePppoeSecret(decrypted, sub.pppoeUsername);
+            if (ok) fixed.push({ pppoeUsername: sub.pppoeUsername });
+          } else {
+            fixed.push({ pppoeUsername: sub.pppoeUsername });
+          }
+        }
+      }
+      this.logger.log(`Reconcile ${router.name}: ${fixed.length} PPPoE di-enable (dari ${disabledSet.size} disabled, ${activeSubs.length} active billing)`);
+      result.push({
+        router: router.name,
+        activeBilling: activeSubs.length,
+        disabledDiRouter: disabledSet.size,
+        diperbaiki: fixed,
+      });
+    }
+    return result;
+  }
 
   /** Ganti password API dengan penanda tersamar untuk respons ke klien. */
   private maskRouter(router: Router): Router {

@@ -7,6 +7,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
+        TZ: 'Asia/Jakarta',
       },
     },
     {
@@ -16,6 +17,7 @@ module.exports = {
       args: 'start -p 3001',
       env: {
         NODE_ENV: 'production',
+        TZ: 'Asia/Jakarta',
       },
     },
     {
@@ -25,6 +27,7 @@ module.exports = {
       args: 'start -p 3002',
       env: {
         NODE_ENV: 'production',
+        TZ: 'Asia/Jakarta',
       },
     },
   ],

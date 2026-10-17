@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { Download } from "lucide-react";
 import { api } from "@/lib/api";
 import { AdminLayout } from "@/components/admin-layout";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,29 @@ export default function InvoiceDetailPage() {
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState("");
   const [payResult, setPayResult] = useState<any>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  // Download PDF invoice. Endpoint butuh JWT, jadi ambil sebagai blob lewat
+  // axios (interceptor menyisipkan token) lalu picu unduhan di browser.
+  async function handleDownloadPdf() {
+    if (!invoice?.id) return;
+    setDownloading(true);
+    try {
+      const res = await api.get(`/invoices/${invoice.id}/pdf`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${invoice.invoiceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Gagal mengunduh PDF invoice.");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   function load() {
     if (params?.id) {
@@ -60,6 +84,24 @@ export default function InvoiceDetailPage() {
     load();
   }
 
+  async function handleManualPay() {
+    const note = window.prompt(
+      "Pembayaran MANUAL (bypass). Invoice akan ditandai LUNAS dan layanan diaktifkan otomatis.\n\nCatatan (opsional, mis. 'Transfer BCA 7 Okt a/n Budi'):",
+      "",
+    );
+    if (note === null) return; // batal
+    setPaying(true);
+    setPayError("");
+    try {
+      await api.post(`/payments/manual/${invoice.id}`, { note: note || undefined });
+      load();
+    } catch (err: any) {
+      setPayError(err?.response?.data?.message ?? "Gagal memproses pembayaran manual.");
+    } finally {
+      setPaying(false);
+    }
+  }
+
   if (!invoice) {
     return (
       <AdminLayout>
@@ -72,9 +114,14 @@ export default function InvoiceDetailPage() {
 
   return (
     <AdminLayout>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Detail Invoice</h1>
-        <p className="text-muted-foreground">{invoice.invoiceNumber}</p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Detail Invoice</h1>
+          <p className="text-muted-foreground">{invoice.invoiceNumber}</p>
+        </div>
+        <Button variant="outline" onClick={handleDownloadPdf} disabled={downloading}>
+          <Download className="mr-1 h-4 w-4" /> {downloading ? "Menyiapkan..." : "Download PDF"}
+        </Button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -153,6 +200,25 @@ export default function InvoiceDetailPage() {
                     <Button onClick={handlePay} disabled={paying} className="w-full">
                       {paying ? "Memproses..." : "Bayar Sekarang"}
                     </Button>
+
+                    <div className="relative py-1 text-center">
+                      <span className="bg-card px-2 text-[11px] text-muted-foreground relative z-10">atau</span>
+                      <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
+                    </div>
+
+                    {/* Bypass manual: untuk pembayaran transfer/cash manual. Admin tandai
+                        lunas -> layanan aktif otomatis tanpa lewat payment gateway. */}
+                    <Button
+                      onClick={handleManualPay}
+                      disabled={paying}
+                      variant="outline"
+                      className="w-full border-emerald-500 text-emerald-700 hover:bg-emerald-50"
+                    >
+                      {paying ? "Memproses..." : "Tandai Lunas (Pembayaran Manual)"}
+                    </Button>
+                    <p className="text-[11px] text-muted-foreground">
+                      Gunakan jika pelanggan sudah bayar via transfer/cash manual. Invoice akan lunas &amp; layanan diaktifkan otomatis.
+                    </p>
                   </>
                 ) : isMockGateway ? (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">

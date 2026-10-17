@@ -23,6 +23,11 @@ function invoiceBlock(ctx: any): string {
 }
 
 const DIV = "━━━━━━━━━━━━━━━━━━━━";
+// Peringatan: pembayaran WAJIB lewat sistem, bukan transfer manual ke rekening pribadi.
+const PAY_WARNING =
+  `⚠️ *Pembayaran hanya melalui link resmi di atas.*\n` +
+  `Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi). ` +
+  `Pembayaran di luar sistem tidak tercatat & layanan tidak otomatis aktif.`;
 
 const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
   invoice_created: (ctx) =>
@@ -30,6 +35,7 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan internet Anda telah terbit.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Bayar sekarang* (tanpa login):\n${ctx.paymentLink}\n\n` +
+    `${PAY_WARNING}\n\n` +
     `Abaikan pesan ini jika sudah membayar. Terima kasih 🙏\n_${BRAND}_`,
 
   reminder_h3: (ctx) =>
@@ -37,6 +43,7 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan Anda akan *jatuh tempo dalam 3 hari*.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Bayar sekarang*:\n${ctx.paymentLink}\n\n` +
+    `${PAY_WARNING}\n\n` +
     `Mohon siapkan pembayaran ya. Terima kasih 🙏\n_${BRAND}_`,
 
   reminder_h1: (ctx) =>
@@ -44,6 +51,7 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan Anda *jatuh tempo besok*.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Bayar sekarang*:\n${ctx.paymentLink}\n\n` +
+    `${PAY_WARNING}\n\n` +
     `Bayar sebelum jatuh tempo agar layanan tetap aktif 🙏\n_${BRAND}_`,
 
   overdue: (ctx) =>
@@ -51,19 +59,23 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan Anda telah *melewati jatuh tempo*.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Segera bayar* untuk menghindari pemutusan layanan:\n${ctx.paymentLink}\n\n` +
+    `${PAY_WARNING}\n\n` +
     `_${BRAND}_`,
 
   isolir: (ctx) =>
     `*LAYANAN DINONAKTIFKAN* 🔌\n${DIV}\n` +
     `Halo *${ctx.customerName}*, mohon maaf layanan internet Anda kami *nonaktifkan sementara* karena tunggakan tagihan *${ctx.invoiceNumber}*.\n\n` +
     `💳 *Bayar untuk aktif kembali* (otomatis):\n${ctx.paymentLink}\n\n` +
+    `${PAY_WARNING}\n\n` +
     `Layanan aktif kembali segera setelah pembayaran diterima 🙏\n_${BRAND}_`,
 
   payment_success: (ctx) =>
     `*PEMBAYARAN DITERIMA* ✅\n${DIV}\n` +
     `Halo *${ctx.customerName}*, terima kasih! Pembayaran Anda telah kami terima.\n\n` +
     `🧾 *No. Tagihan* : ${ctx.invoiceNumber}\n` +
-    `💰 *Dibayar*     : Rp ${ctx.amount}\n${DIV}\n` +
+    `💰 *Dibayar*     : Rp ${ctx.amount}\n` +
+    (ctx.paidAt ? `🕒 *Waktu Bayar* : ${ctx.paidAt} WIB\n` : "") +
+    `${DIV}\n` +
     `Layanan Anda aktif. Terima kasih telah berlangganan 🙏\n_${BRAND}_`,
 };
 
@@ -156,7 +168,7 @@ export class NotificationsService {
           amountLabel: "Total Tagihan",
           buttonText: ctx.paymentLink ? "Bayar Sekarang" : undefined,
           buttonUrl: ctx.paymentLink,
-          note: "Abaikan email ini jika Anda sudah membayar.",
+          note: "Pembayaran hanya melalui tombol/link resmi di atas. Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi) — pembayaran di luar sistem tidak tercatat dan layanan tidak otomatis aktif. Abaikan email ini jika Anda sudah membayar.",
         };
       case "reminder_h3":
       case "reminder_h1":
@@ -171,6 +183,7 @@ export class NotificationsService {
           amountLabel: "Total Tagihan",
           buttonText: ctx.paymentLink ? "Bayar Sekarang" : undefined,
           buttonUrl: ctx.paymentLink,
+          note: "Pembayaran hanya melalui tombol/link resmi di atas. Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi).",
         };
       case "overdue":
         return {
@@ -182,6 +195,7 @@ export class NotificationsService {
           amountLabel: "Total Tagihan",
           buttonText: ctx.paymentLink ? "Bayar Sekarang" : undefined,
           buttonUrl: ctx.paymentLink,
+          note: "Pembayaran hanya melalui tombol/link resmi di atas. Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi).",
         };
       case "isolir":
         return {
@@ -196,7 +210,10 @@ export class NotificationsService {
         return {
           ...base,
           intro: "Terima kasih! Pembayaran Anda telah kami terima.",
-          rows: invoiceRows,
+          rows: [
+            { label: "No. Tagihan", value: ctx.invoiceNumber ?? "-" },
+            ...(ctx.paidAt ? [{ label: "Waktu Bayar", value: `${ctx.paidAt} WIB` }] : []),
+          ],
           amount: ctx.amount ? `Rp ${ctx.amount}` : undefined,
           amountLabel: "Jumlah Dibayar",
         };
@@ -334,6 +351,7 @@ export class NotificationsService {
     invoiceNumber?: string;
     customerName?: string;
     customerNumber?: string;
+    routerName?: string;
     paidAt?: string;
   }) {
     const numbers = (data.adminNumbers || "")
@@ -343,14 +361,17 @@ export class NotificationsService {
     if (numbers.length === 0) return;
 
     const amount = Number(data.amount).toLocaleString("id-ID");
-    const waktu = data.paidAt
-      ? new Date(data.paidAt).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })
-      : new Date().toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    const waktu = (data.paidAt ? new Date(data.paidAt) : new Date()).toLocaleString("id-ID", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Jakarta",
+    });
     const message =
       `💰 *Pembayaran Masuk*\n\n` +
       `👤 Pelanggan: ${data.customerName ?? "-"}${data.customerNumber ? ` (${data.customerNumber})` : ""}\n` +
       `🧾 Invoice: ${data.invoiceNumber ?? "-"}\n` +
       `💵 Jumlah: Rp ${amount}\n` +
+      (data.routerName ? `📡 Router: ${data.routerName}\n` : "") +
       `🕒 Waktu: ${waktu}`;
 
     for (const num of numbers) {

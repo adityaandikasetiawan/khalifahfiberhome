@@ -21,6 +21,7 @@ interface Customer {
   routerId?: string | null;
   packageName?: string | null;
   pppoeUsername?: string | null;
+  activeUntil?: string | null;
 }
 
 interface RouterOpt {
@@ -46,6 +47,25 @@ const statusLabel: Record<string, string> = {
   pending_verification: "Verifikasi",
   pending_active: "Menunggu Aktivasi",
 };
+
+// Format masa aktif + indikator warna (merah jika lewat, kuning jika <= 5 hari).
+function MasaAktif({ until }: { until?: string | null }) {
+  if (!until) return <span className="text-xs text-muted-foreground">Belum ada</span>;
+  const d = new Date(until);
+  const now = new Date();
+  const days = Math.ceil((d.getTime() - now.getTime()) / 86400000);
+  const tgl = d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+  let cls = "text-foreground";
+  if (days < 0) cls = "text-destructive font-medium";
+  else if (days <= 5) cls = "text-amber-600 font-medium";
+  return (
+    <span className={`text-sm ${cls}`}>
+      {tgl}
+      {days < 0 && <span className="block text-[11px]">lewat {Math.abs(days)} hari</span>}
+      {days >= 0 && days <= 5 && <span className="block text-[11px]">{days} hari lagi</span>}
+    </span>
+  );
+}
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -146,6 +166,7 @@ export default function CustomersPage() {
                   <TableHead className="w-[140px]">Telepon</TableHead>
                   <TableHead className="w-[150px]">Router</TableHead>
                   <TableHead className="w-[150px]">Paket</TableHead>
+                  <TableHead className="w-[140px]">Masa Aktif</TableHead>
                   <TableHead className="w-[110px]">Status</TableHead>
                   <TableHead className="w-[80px] text-right">Aksi</TableHead>
                 </TableRow>
@@ -166,6 +187,7 @@ export default function CustomersPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-sm">{c.packageName ?? "-"}</TableCell>
+                    <TableCell><MasaAktif until={c.activeUntil} /></TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(c.status) as any}>
                         {statusLabel[c.status] ?? c.status}
@@ -180,7 +202,7 @@ export default function CustomersPage() {
                 ))}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
                       Tidak ada data pelanggan
                     </TableCell>
                   </TableRow>

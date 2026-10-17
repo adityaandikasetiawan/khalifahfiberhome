@@ -24,34 +24,29 @@ export class InvoiceGeneratorJob {
     @InjectQueue("notifications") private readonly notificationsQueue: Queue,
   ) {}
 
+  /**
+   * DINONAKTIFKAN sejak model billing diubah menjadi "masa aktif = tanggal
+   * bayar + 1 bulan kalender".
+   *
+   * Dulu cron ini men-generate invoice berdasarkan billingDay (periode kalender
+   * 01-akhir bulan). Dengan model baru, penagihan PERPANJANGAN ditangani oleh
+   * cron RENEWAL (handleRenewalGeneration, H-3 sebelum masa aktif habis). Jika
+   * cron ini tetap aktif, ia membuat invoice periode-kalender yang DOBEL dengan
+   * invoice renewal/manual (ditemukan sebagai "invoice hantu" 01-31 Okt).
+   *
+   * Invoice AWAL pelanggan baru dibuat saat registrasi / oleh admin (endpoint
+   * create invoice manual), bukan oleh cron ini.
+   *
+   * Sengaja TIDAK dihapus total agar jejak keputusan jelas; body dikosongkan
+   * sehingga tidak ada invoice yang dibuat.
+   */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async handleDailyInvoiceGeneration() {
-    const today = new Date().getDate();
-    this.logger.log(`Menjalankan invoice generator untuk billingDay=${today}`);
-
-    const dueSubscriptions = await this.subscriptionsService.findActiveDueToday(today);
-    this.logger.log(`Ditemukan ${dueSubscriptions.length} subscription jatuh tempo hari ini`);
-
-    const now = new Date();
-    for (const subscription of dueSubscriptions) {
-      try {
-        // Guard: jangan tagih sebelum masa aktif dimulai (startDate).
-        // Dipakai a.l. untuk menunda penagihan pelanggan migrasi ke bulan berikutnya.
-        if (subscription.startDate && new Date(subscription.startDate) > now) {
-          this.logger.log(
-            `Lewati subscription ${subscription.id}: startDate ${new Date(subscription.startDate).toISOString().split("T")[0]} belum tiba`,
-          );
-          continue;
-        }
-        const invoice = await this.invoicesService.generateMonthlyInvoiceForSubscription(subscription);
-        await this.notificationsQueue.add("invoice_created", {
-          customerId: subscription.customer.id,
-          invoiceId: invoice.id,
-        });
-      } catch (err) {
-        this.logger.error(`Gagal generate invoice untuk subscription ${subscription.id}`, err as Error);
-      }
-    }
+    this.logger.debug(
+      "handleDailyInvoiceGeneration dinonaktifkan (model billing = tgl bayar + 1 bulan). " +
+        "Perpanjangan ditangani cron renewal H-3.",
+    );
+    return;
   }
 
   // Menandai invoice yang lewat jatuh tempo sebagai "overdue", dijalankan tiap dini hari
@@ -89,11 +84,17 @@ export class InvoiceGeneratorJob {
           trigger.getDate() === today.getDate();
         if (!sameDay) continue;
 
-        // Periode baru: mulai sehari setelah masa aktif berakhir, selama 1 bulan
+        // Periode baru (PERKIRAAN saat terbit; final ditentukan markAsPaid saat
+        // dibayar): mulai sehari setelah masa aktif berakhir, selama 1 bulan
+        // kalender.
         const periodStart = new Date(activeUntil);
         periodStart.setDate(periodStart.getDate() + 1);
         const periodEnd = new Date(periodStart);
+        const psDay = periodStart.getDate();
         periodEnd.setMonth(periodEnd.getMonth() + 1);
+        if (periodEnd.getDate() !== psDay) {
+          periodEnd.setDate(0);
+        }
         periodEnd.setDate(periodEnd.getDate() - 1);
 
         const invoice = await this.invoicesService.generateRenewalInvoice(sub, periodStart, periodEnd);

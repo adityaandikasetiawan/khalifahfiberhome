@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
 import * as crypto from "crypto";
 import { Invoice } from "./entities/invoice.entity";
 import { InvoiceItem } from "./entities/invoice-item.entity";
@@ -15,6 +17,7 @@ export class InvoicesService {
     @InjectRepository(Invoice) private readonly invoiceRepo: Repository<Invoice>,
     @InjectRepository(InvoiceItem) private readonly itemRepo: Repository<InvoiceItem>,
     @InjectRepository(Subscription) private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectQueue("notifications") private readonly notificationsQueue: Queue,
   ) {}
 
   private generateInvoiceNumber(date: Date): string {
@@ -45,7 +48,10 @@ export class InvoicesService {
    * Membuat invoice manual (mis. biaya instalasi/tambahan di luar siklus bulanan).
    */
   async create(dto: CreateInvoiceDto): Promise<Invoice> {
-    const subscription = await this.subscriptionRepo.findOne({ where: { id: dto.subscriptionId } });
+    const subscription = await this.subscriptionRepo.findOne({
+      where: { id: dto.subscriptionId },
+      relations: ["customer"],
+    });
     if (!subscription) throw new NotFoundException("Subscription tidak ditemukan");
     if (!dto.items.length) throw new BadRequestException("Invoice harus memiliki minimal 1 item");
 
@@ -91,7 +97,22 @@ export class InvoicesService {
       items,
     });
 
-    return this.invoiceRepo.save(invoice);
+    const saved = await this.invoiceRepo.save(invoice);
+
+    // Kirim notifikasi "tagihan baru" ke pelanggan (WA + email), sama seperti
+    // invoice yang dibuat otomatis oleh cron bulanan. Dibungkus try/catch agar
+    // kegagalan enqueue tidak membatalkan pembuatan invoice.
+    try {
+      await this.notificationsQueue.add(
+        "invoice_created",
+        { customerId: subscription.customer?.id, invoiceId: saved.id },
+        { attempts: 5, backoff: { type: "exponential", delay: 30000 } },
+      );
+    } catch (err) {
+      this.logger.error(`Gagal enqueue notifikasi invoice ${saved.invoiceNumber}: ${(err as Error).message}`);
+    }
+
+    return saved;
   }
 
   /**
@@ -99,12 +120,45 @@ export class InvoicesService {
    * Membuat invoice bulanan otomatis untuk semua subscription yang billingDay-nya
    * jatuh pada tanggal hari ini.
    */
+  /**
+   * Susun item invoice + total dengan memperhitungkan diskon bulanan per
+   * subscription (mis. subsidi/donasi). Mengembalikan baris langganan + baris
+   * potongan (nilai negatif) bila ada diskon. Total tidak pernah < 0.
+   */
+  private buildItemsWithDiscount(subscription: Subscription, periodStart: Date) {
+    const price = Number(subscription.package.price);
+    const discount = Number((subscription as any).discount ?? 0);
+    const total = Math.max(0, price - discount);
+    const label = periodStart.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+
+    const items = [
+      this.itemRepo.create({
+        description: `Langganan ${subscription.package.name} - ${label}`,
+        qty: 1,
+        unitPrice: price,
+        subtotal: price,
+      }),
+    ];
+    if (discount > 0) {
+      items.push(
+        this.itemRepo.create({
+          description: "Potongan/subsidi",
+          qty: 1,
+          unitPrice: -discount,
+          subtotal: -discount,
+        }),
+      );
+    }
+    return { items, total };
+  }
+
   async generateMonthlyInvoiceForSubscription(subscription: Subscription): Promise<Invoice> {
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const dueDate = new Date(now);
-    dueDate.setDate(dueDate.getDate() + 7); // jatuh tempo 7 hari
+    // Jatuh tempo = akhir masa aktif (periodEnd), BUKAN terbit + 7 hari.
+    // Pelanggan membayar untuk periode berjalan sampai tanggal ini.
+    const dueDate = new Date(periodEnd);
 
     // Guard anti duplikat: kalau invoice untuk subscription + periode ini sudah
     // ada (mis. cron jalan >1 instance, atau job ter-retry), kembalikan yang ada
@@ -123,12 +177,7 @@ export class InvoicesService {
       return existing;
     }
 
-    const item = this.itemRepo.create({
-      description: `Langganan ${subscription.package.name} - ${periodStart.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`,
-      qty: 1,
-      unitPrice: subscription.package.price,
-      subtotal: subscription.package.price,
-    });
+    const { items, total } = this.buildItemsWithDiscount(subscription, periodStart);
 
     const invoice = this.invoiceRepo.create({
       invoiceNumber: this.generateInvoiceNumber(now),
@@ -136,12 +185,12 @@ export class InvoicesService {
       subscriptionId: subscription.id,
       periodStart,
       periodEnd,
-      amount: subscription.package.price,
+      amount: total,
       taxAmount: 0,
-      totalAmount: subscription.package.price,
+      totalAmount: total,
       dueDate,
       status: "unpaid",
-      items: [item],
+      items,
     });
 
     const saved = await this.invoiceRepo.save(invoice);
@@ -182,12 +231,7 @@ export class InvoicesService {
     const dueDate = new Date(periodStart);
     dueDate.setDate(dueDate.getDate() - 1);
 
-    const item = this.itemRepo.create({
-      description: `Langganan ${subscription.package.name} - ${periodStart.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`,
-      qty: 1,
-      unitPrice: subscription.package.price,
-      subtotal: subscription.package.price,
-    });
+    const { items, total } = this.buildItemsWithDiscount(subscription, periodStart);
 
     const invoice = this.invoiceRepo.create({
       invoiceNumber: this.generateInvoiceNumber(now),
@@ -195,12 +239,12 @@ export class InvoicesService {
       subscriptionId: subscription.id,
       periodStart,
       periodEnd,
-      amount: subscription.package.price,
+      amount: total,
       taxAmount: 0,
-      totalAmount: subscription.package.price,
+      totalAmount: total,
       dueDate,
       status: "unpaid",
-      items: [item],
+      items,
     });
     const saved = await this.invoiceRepo.save(invoice);
     this.logger.log(`Invoice perpanjangan ${saved.invoiceNumber} dibuat untuk subscription ${subscription.id} (periode ${periodStart.toISOString().split("T")[0]} s/d ${periodEnd.toISOString().split("T")[0]}, jatuh tempo ${dueDate.toISOString().split("T")[0]})`);
@@ -231,10 +275,38 @@ export class InvoicesService {
     return invoice;
   }
 
+  /**
+   * Tambah 1 BULAN KALENDER dari sebuah tanggal, aman terhadap overflow akhir
+   * bulan: 31 Jan + 1 bln -> 28/29 Feb (clamp ke hari terakhir bulan target),
+   * 30 Jan + 1 bln -> 28/29 Feb. Timezone mengikuti server (TZ=Asia/Jakarta).
+   */
+  private addOneCalendarMonth(from: Date): Date {
+    const d = new Date(from);
+    const day = d.getDate();
+    const t = new Date(d);
+    t.setMonth(t.getMonth() + 1);
+    // Jika hari meluber ke bulan berikutnya (mis. 31 Jan -> 3 Mar), mundur ke
+    // hari terakhir bulan target.
+    if (t.getDate() !== day) {
+      t.setDate(0);
+    }
+    return t;
+  }
+
   async markAsPaid(id: string): Promise<Invoice> {
     const invoice = await this.findOne(id);
+    const paidAt = new Date();
     invoice.status = "paid";
-    invoice.paidAt = new Date();
+    invoice.paidAt = paidAt;
+    // Masa aktif dihitung ULANG saat invoice DIBAYAR:
+    // periodStart = tanggal bayar, periodEnd = tanggal bayar + 1 bulan kalender.
+    // Ini menggantikan periode "perkiraan" yang diisi saat invoice terbit.
+    invoice.periodStart = paidAt;
+    invoice.periodEnd = this.addOneCalendarMonth(paidAt);
+    // Jatuh tempo = akhir masa aktif (periodEnd). Harus ikut digeser saat
+    // pembayaran agar tagihan berikutnya / isolir dihitung dari akhir masa
+    // aktif yang baru, bukan dari periode kalender lama.
+    invoice.dueDate = invoice.periodEnd;
     return this.invoiceRepo.save(invoice);
   }
 
@@ -247,12 +319,27 @@ export class InvoicesService {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - graceDays);
 
-    return this.invoiceRepo
-      .createQueryBuilder("invoice")
-      .leftJoinAndSelect("invoice.subscription", "subscription")
-      .where("invoice.status IN (:...statuses)", { statuses: ["unpaid", "overdue"] })
-      .andWhere("invoice.dueDate <= :cutoff", { cutoff })
-      .getMany();
+    return (
+      this.invoiceRepo
+        .createQueryBuilder("invoice")
+        .leftJoinAndSelect("invoice.subscription", "subscription")
+        .where("invoice.status IN (:...statuses)", { statuses: ["unpaid", "overdue"] })
+        .andWhere("invoice.dueDate <= :cutoff", { cutoff })
+        // JANGAN isolir pelanggan yang MASIH punya masa aktif berjalan: yaitu
+        // ada invoice LUNAS lain dengan periodEnd >= hari ini. Mencegah pelanggan
+        // yang sudah bayar periode berjalan ikut terisolir hanya karena ada
+        // invoice unpaid lain (mis. renewal terbit lebih awal / invoice dobel).
+        // Pelanggan baru diisolir bila benar-benar sudah lewat masa aktif.
+        .andWhere(
+          `NOT EXISTS (
+            SELECT 1 FROM invoices paid
+            WHERE paid.subscription_id = invoice.subscription_id
+              AND paid.status = 'paid'
+              AND paid."periodEnd" >= CURRENT_DATE
+          )`,
+        )
+        .getMany()
+    );
   }
 
   // Menandai invoice unpaid yang lewat jatuh tempo sebagai overdue (dijalankan harian)
