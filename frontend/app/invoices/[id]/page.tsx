@@ -279,17 +279,37 @@ export default function InvoiceDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {invoice.payments.map((p: any) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="uppercase text-xs">{p.paymentMethod}</TableCell>
-                        <TableCell>
-                          <Badge variant={statusVariant(p.status) as any}>{p.status}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right text-xs">
-                          {new Date(p.createdAt).toLocaleString("id-ID")}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {invoice.payments.map((p: any) => {
+                      const note = p.rawPayload?.note;
+                      const isManual = p.rawPayload?.manual === true;
+                      return (
+                        <>
+                          <TableRow key={p.id}>
+                            <TableCell className="uppercase text-xs">
+                              {p.paymentMethod}
+                              {isManual && (
+                                <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                                  MANUAL
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={statusVariant(p.status) as any}>{p.status}</Badge>
+                            </TableCell>
+                            <TableCell className="text-right text-xs">
+                              {new Date(p.createdAt).toLocaleString("id-ID")}
+                            </TableCell>
+                          </TableRow>
+                          {note && (
+                            <TableRow key={`${p.id}-note`} className="bg-muted/30">
+                              <TableCell colSpan={3} className="text-xs text-muted-foreground">
+                                <span className="font-medium text-foreground">Catatan:</span> {note}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>

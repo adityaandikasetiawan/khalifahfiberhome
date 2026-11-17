@@ -40,7 +40,7 @@ export class IsolirSchedulerJob {
           reason: `Invoice ${invoice.invoiceNumber} belum dibayar setelah ${graceDays} hari jatuh tempo`,
         },
         {
-          jobId: `suspend:${invoice.subscriptionId}`,
+          jobId: `suspend-${invoice.subscriptionId}`,
           attempts: 5,
           backoff: { type: "exponential", delay: 30000 },
         },

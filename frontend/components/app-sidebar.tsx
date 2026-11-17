@@ -24,6 +24,7 @@ import {
   CreditCard,
   Radio,
   ChevronDown,
+  Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -72,6 +73,7 @@ const NAV: NavEntry[] = [
     children: [
       { href: "/broadcast", label: "Broadcast", icon: Megaphone },
       { href: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
+      { href: "/whatsapp-usage", label: "Biaya WhatsApp", icon: Wallet },
     ],
   },
   { href: "/tickets", label: "Tiket Gangguan", icon: MessageSquare },
@@ -91,6 +93,7 @@ export function AppSidebar() {
     if (isGroup(e)) initialOpen[e.label] = e.children.some((c) => isActivePath(pathname, c.href));
   }
   const [open, setOpen] = useState<Record<string, boolean>>(initialOpen);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   function handleLogout() {
     localStorage.removeItem("accessToken");
@@ -107,70 +110,82 @@ export function AppSidebar() {
     );
 
   return (
-    <aside className="flex h-screen w-64 flex-col border-r bg-sidebar">
-      <div className="flex h-16 items-center gap-2 px-6">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.png" alt="Khalifah Fiber Home" className="h-9 w-auto object-contain" />
-      </div>
-      <Separator />
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {NAV.map((entry) => {
-          if (!isGroup(entry)) {
-            const active = isActivePath(pathname, entry.href);
-            return (
-              <Link key={entry.href} href={entry.href} className={linkClass(active)}>
-                <entry.icon className="h-4 w-4" />
-                {entry.label}
-              </Link>
-            );
-          }
+    <>
+      {!mobileOpen && (
+        <div className="md:hidden fixed top-4 left-4 z-50">
+          <button onClick={() => setMobileOpen(true)} className="rounded-md p-2 bg-sidebar border shadow-sm">
+            <Menu className="h-5 w-5" />
+          </button>
+        </div>
+      )}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />
+      )}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col border-r bg-sidebar transition-transform duration-300 md:relative md:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="flex h-16 items-center gap-2 px-6">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Khalifah Fiber Home" className="h-9 w-auto object-contain" />
+        </div>
+        <Separator />
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+          {NAV.map((entry) => {
+            if (!isGroup(entry)) {
+              const active = isActivePath(pathname, entry.href);
+              return (
+                <Link key={entry.href} href={entry.href} className={linkClass(active)} onClick={() => setMobileOpen(false)}>
+                  <entry.icon className="h-4 w-4" />
+                  {entry.label}
+                </Link>
+              );
+            }
 
-          const groupActive = entry.children.some((c) => isActivePath(pathname, c.href));
-          const isOpen = open[entry.label] ?? groupActive;
-          return (
-            <div key={entry.label}>
-              <button
-                onClick={() => setOpen((s) => ({ ...s, [entry.label]: !isOpen }))}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  groupActive
-                    ? "text-sidebar-primary"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                )}
-              >
-                <entry.icon className="h-4 w-4" />
-                <span className="flex-1 text-left">{entry.label}</span>
-                <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", isOpen && "rotate-180")} />
-              </button>
-              <div
-                className={cn(
-                  "overflow-hidden transition-all duration-200",
-                  isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0",
-                )}
-              >
-                <div className="mt-1 space-y-1">
-                  {entry.children.map((c) => (
-                    <Link key={c.href} href={c.href} className={linkClass(isActivePath(pathname, c.href), true)}>
-                      <c.icon className="h-3.5 w-3.5" />
-                      {c.label}
-                    </Link>
-                  ))}
+            const groupActive = entry.children.some((c) => isActivePath(pathname, c.href));
+            const isOpen = open[entry.label] ?? groupActive;
+            return (
+              <div key={entry.label}>
+                <button
+                  onClick={() => setOpen((s) => ({ ...s, [entry.label]: !isOpen }))}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    groupActive
+                      ? "text-sidebar-primary"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  <entry.icon className="h-4 w-4" />
+                  <span className="flex-1 text-left">{entry.label}</span>
+                  <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", isOpen && "rotate-180")} />
+                </button>
+                <div
+                  className={cn(
+                    "overflow-hidden transition-all duration-200",
+                    isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0",
+                  )}
+                >
+                  <div className="mt-1 space-y-1">
+                    {entry.children.map((c) => (
+                      <Link key={c.href} href={c.href} className={linkClass(isActivePath(pathname, c.href), true)} onClick={() => setMobileOpen(false)}>
+                        <c.icon className="h-3.5 w-3.5" />
+                        {c.label}
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </nav>
-      <Separator />
-      <div className="p-3">
-        <button
-          onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-destructive transition-colors"
-        >
-          <LogOut className="h-4 w-4" />
-          Keluar
-        </button>
-      </div>
-    </aside>
+            );
+          })}
+        </nav>
+        <Separator />
+        <div className="p-3">
+          <button
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-destructive transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Keluar
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }

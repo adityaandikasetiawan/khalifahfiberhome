@@ -298,6 +298,76 @@ export class PaymentsService {
   }
 
   /**
+   * REKONSILIASI PEMBAYARAN PENDING (jaring pengaman webhook).
+   *
+   * Webhook iPaymu kadang TIDAK sampai (jaringan, konfigurasi notifyUrl, dll),
+   * sehingga pembayaran pelanggan yang SUDAH berhasil tetap tercatat "pending"
+   * dan layanan tidak aktif otomatis. Method ini men-cek SEMUA payment pending
+   * (punya transactionId iPaymu) langsung ke iPaymu via checkTransaction. Kalau
+   * sudah "Berhasil", diproses lewat handleWebhook yang sama (idempoten) ->
+   * invoice lunas + aktivasi PPPoE otomatis, tanpa menunggu webhook/admin.
+   *
+   * Dipanggil oleh cron (lihat PaymentReconcileJob). Aman dijalankan berulang.
+   */
+  async reconcilePendingPayments(maxAgeHours = 48): Promise<{ checked: number; confirmed: number }> {
+    if (this.config.get("PAYMENT_PROVIDER") !== "ipaymu") {
+      return { checked: 0, confirmed: 0 };
+    }
+    // Ambil payment pending dalam rentang umur wajar (hindari cek transaksi
+    // super lama yang pasti sudah expired).
+    const cutoff = new Date();
+    cutoff.setHours(cutoff.getHours() - maxAgeHours);
+
+    const pendings = await this.repo
+      .createQueryBuilder("p")
+      .where("p.status = :st", { st: "pending" })
+      .andWhere("p.createdAt >= :cutoff", { cutoff })
+      .orderBy("p.createdAt", "DESC")
+      .getMany();
+
+    let confirmed = 0;
+    for (const p of pendings) {
+      const trxId = p.rawPayload?.transactionId;
+      if (!trxId) continue;
+      // Skip jika invoice-nya SUDAH lunas (mis. pelanggan generate QRIS beberapa
+      // kali tapi bayar salah satu). Tak perlu cek ke iPaymu lagi; tandai payment
+      // pending sisa ini sebagai expired agar tidak dicek berulang tiap 5 menit.
+      try {
+        const inv = await this.invoicesService.findOne(p.invoiceId);
+        if (inv.status === "paid") {
+          p.status = "expired";
+          await this.repo.save(p);
+          continue;
+        }
+      } catch {
+        /* invoice tak ketemu -> lanjut cek seperti biasa */
+      }
+      try {
+        const result = await this.ipaymiuSafeCheck(trxId);
+        if (result === "success") {
+          await this.handleWebhook({
+            gatewayReference: p.gatewayReference!,
+            status: "success",
+            rawPayload: { ...p.rawPayload, reconciledByCron: true },
+          });
+          confirmed++;
+          this.logger.log(`Reconcile: pembayaran ${p.gatewayReference} dikonfirmasi lunas via polling iPaymu`);
+        }
+      } catch (err) {
+        this.logger.warn(`Reconcile: gagal cek transaksi ${trxId} (${p.gatewayReference}): ${(err as Error).message}`);
+      }
+    }
+    if (confirmed > 0) this.logger.log(`Reconcile pembayaran: ${confirmed}/${pendings.length} pending dikonfirmasi lunas`);
+    return { checked: pendings.length, confirmed };
+  }
+
+  /** Bungkus checkTransaction agar error tidak menghentikan loop rekonsiliasi. */
+  private async ipaymiuSafeCheck(trxId: string): Promise<"success" | "pending" | "failed"> {
+    const result = await this.ipaymuProvider.checkTransaction(trxId);
+    return result.status;
+  }
+
+  /**
    * PEMBAYARAN MANUAL (bypass gateway) oleh admin.
    * Dipakai saat pelanggan membayar via transfer/cash manual: admin menandai
    * invoice lunas, dan sistem memproses SEPERTI pembayaran gateway sukses —

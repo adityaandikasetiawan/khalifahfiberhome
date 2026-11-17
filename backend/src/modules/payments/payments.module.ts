@@ -9,6 +9,7 @@ import { PaymentWebhookController } from "./webhooks/payment-webhook.controller"
 import { MidtransProvider } from "./gateways/midtrans.provider";
 import { XenditProvider } from "./gateways/xendit.provider";
 import { IpaymuProvider } from "./gateways/ipaymu.provider";
+import { PaymentReconcileJob } from "./payment-reconcile.job";
 import { InvoicesModule } from "../invoices/invoices.module";
 
 @Module({
@@ -17,7 +18,7 @@ import { InvoicesModule } from "../invoices/invoices.module";
     BullModule.registerQueue({ name: "notifications" }, { name: "isolir" }),
     InvoicesModule,
   ],
-  providers: [PaymentsService, MidtransProvider, XenditProvider, IpaymuProvider],
+  providers: [PaymentsService, MidtransProvider, XenditProvider, IpaymuProvider, PaymentReconcileJob],
   controllers: [PaymentsController, PaymentWebhookController],
   exports: [PaymentsService],
 })

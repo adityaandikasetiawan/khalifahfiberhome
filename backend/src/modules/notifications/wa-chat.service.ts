@@ -99,4 +99,54 @@ export class WaChatService {
   async unreadCount(): Promise<number> {
     return this.repo.count({ where: { direction: "in", isRead: false } });
   }
+
+  /**
+   * Statistik penggunaan & biaya WhatsApp. Biaya dihitung dari pesan KELUAR
+   * (direction='out') — yaitu pesan yang DIKIRIM sistem ke pelanggan (notifikasi
+   * tagihan, pembayaran, broadcast, chat admin). Pesan masuk tidak dikenai biaya.
+   *
+   * @param costPerMessage biaya per pesan (default Rp500)
+   * @param from/to filter rentang tanggal opsional (YYYY-MM-DD)
+   */
+  async usageStats(costPerMessage = 500, from?: string, to?: string) {
+    const qb = this.repo
+      .createQueryBuilder("m")
+      .where("m.direction = :dir", { dir: "out" });
+    if (from) qb.andWhere('m."createdAt" >= :from', { from: `${from} 00:00:00` });
+    if (to) qb.andWhere('m."createdAt" <= :to', { to: `${to} 23:59:59` });
+
+    const totalSent = await qb.getCount();
+
+    // Breakdown per bulan (YYYY-MM).
+    const perMonth = await this.repo.query(
+      `SELECT to_char("createdAt", 'YYYY-MM') AS periode, COUNT(*)::int AS jumlah
+       FROM wa_messages
+       WHERE direction = 'out'
+         ${from ? `AND "createdAt" >= '${from} 00:00:00'` : ""}
+         ${to ? `AND "createdAt" <= '${to} 23:59:59'` : ""}
+       GROUP BY 1 ORDER BY 1 DESC`,
+    );
+
+    // Breakdown per tipe pesan (text/image/document).
+    const perType = await this.repo.query(
+      `SELECT type AS tipe, COUNT(*)::int AS jumlah
+       FROM wa_messages
+       WHERE direction = 'out'
+         ${from ? `AND "createdAt" >= '${from} 00:00:00'` : ""}
+         ${to ? `AND "createdAt" <= '${to} 23:59:59'` : ""}
+       GROUP BY 1 ORDER BY 2 DESC`,
+    );
+
+    return {
+      costPerMessage,
+      totalSent,
+      totalCost: totalSent * costPerMessage,
+      perMonth: perMonth.map((r: any) => ({
+        periode: r.periode,
+        jumlah: r.jumlah,
+        biaya: r.jumlah * costPerMessage,
+      })),
+      perType: perType.map((r: any) => ({ tipe: r.tipe, jumlah: r.jumlah })),
+    };
+  }
 }

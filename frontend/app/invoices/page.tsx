@@ -55,6 +55,8 @@ export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState(""); // filter jatuh tempo dari
+  const [dateTo, setDateTo] = useState(""); // filter jatuh tempo sampai
   const [page, setPage] = useState(1);
 
   // State form "Buat Invoice Manual"
@@ -204,13 +206,17 @@ export default function InvoicesPage() {
         (inv.subscription?.customer?.name ?? "").toLowerCase().includes(q) ||
         (inv.invoiceNumber ?? "").toLowerCase().includes(q);
       const matchStatus = !statusFilter || inv.status === statusFilter;
-      return matchSearch && matchStatus;
+      // Filter rentang tanggal berdasarkan jatuh tempo (dueDate).
+      const due = inv.dueDate ? inv.dueDate.slice(0, 10) : "";
+      const matchFrom = !dateFrom || (due && due >= dateFrom);
+      const matchTo = !dateTo || (due && due <= dateTo);
+      return matchSearch && matchStatus && matchFrom && matchTo;
     });
-  }, [invoices, search, statusFilter]);
+  }, [invoices, search, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, dateFrom, dateTo]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -218,6 +224,14 @@ export default function InvoicesPage() {
   const pageRows = filtered.slice(start, start + PAGE_SIZE);
   const showingFrom = filtered.length === 0 ? 0 : start + 1;
   const showingTo = Math.min(start + PAGE_SIZE, filtered.length);
+
+  // Total nilai rupiah dari invoice yang sedang tampil (sesuai filter/pencarian).
+  const filteredTotal = useMemo(
+    () => filtered.reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0),
+    [filtered],
+  );
+  // Label status untuk teks ringkasan total.
+  const filterLabel = statusFilter ? (statusLabel[statusFilter] ?? statusFilter) : "Semua";
 
   return (
     <AdminLayout>
@@ -239,6 +253,37 @@ export default function InvoicesPage() {
               <span className="text-sm font-normal text-muted-foreground">({filtered.length})</span>
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-muted-foreground">Jatuh tempo</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  title="Dari tanggal"
+                />
+                <span className="text-xs text-muted-foreground">s/d</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  title="Sampai tanggal"
+                />
+                {(dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                    className="h-9 rounded-md border border-input px-2 text-xs text-muted-foreground hover:bg-muted"
+                    title="Reset tanggal"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -259,6 +304,16 @@ export default function InvoicesPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {/* Ringkasan total nilai invoice sesuai filter/pencarian aktif */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-4 py-3">
+            <span className="text-sm text-muted-foreground">
+              Total {filterLabel}{" "}
+              <span className="font-medium text-foreground">({filtered.length} invoice)</span>
+            </span>
+            <span className="text-lg font-bold text-foreground">
+              Rp {filteredTotal.toLocaleString("id-ID")}
+            </span>
+          </div>
           <div className="rounded-md border">
             <Table>
               <TableHeader>

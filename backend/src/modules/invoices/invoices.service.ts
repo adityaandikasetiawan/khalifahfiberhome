@@ -329,7 +329,48 @@ export class InvoicesService {
     // pembayaran agar tagihan berikutnya / isolir dihitung dari akhir masa
     // aktif yang baru, bukan dari periode kalender lama.
     invoice.dueDate = invoice.periodEnd;
-    return this.invoiceRepo.save(invoice);
+    const saved = await this.invoiceRepo.save(invoice);
+
+    // BERSIHKAN INVOICE DOBEL otomatis: hapus invoice lain untuk subscription
+    // yang sama, masih belum lunas (unpaid/overdue), yang periodenya TUMPANG
+    // TINDIH dengan periode invoice yang baru dibayar. Mencegah pelanggan punya
+    // tagihan ganda untuk periode yang sudah dibayar. Konservatif: hanya yang
+    // tumpang tindih; invoice periode BERBEDA (tagihan berikutnya) tidak disentuh.
+    await this.removeOverlappingUnpaid(saved);
+
+    return saved;
+  }
+
+  /**
+   * Hapus invoice unpaid/overdue yang periodenya tumpang tindih dengan `paid`
+   * (invoice yang baru lunas), untuk subscription yang sama. Dipakai agar tidak
+   * ada tagihan dobel setelah pembayaran. Invoice lunas lain TIDAK disentuh.
+   */
+  private async removeOverlappingUnpaid(paid: Invoice): Promise<void> {
+    try {
+      const candidates = await this.invoiceRepo
+        .createQueryBuilder("invoice")
+        .where("invoice.subscriptionId = :sid", { sid: paid.subscriptionId })
+        .andWhere("invoice.id != :id", { id: paid.id })
+        .andWhere("invoice.status IN (:...st)", { st: ["unpaid", "overdue"] })
+        // Tumpang tindih periode: start <= paidEnd AND end >= paidStart.
+        .andWhere("invoice.periodStart <= :pend", { pend: paid.periodEnd })
+        .andWhere("invoice.periodEnd >= :pstart", { pstart: paid.periodStart })
+        .getMany();
+
+      for (const dup of candidates) {
+        await this.invoiceRepo.manager.transaction(async (mgr) => {
+          await mgr.delete(InvoiceItem, { invoiceId: dup.id });
+          await mgr.delete(Invoice, { id: dup.id });
+        });
+        this.logger.warn(
+          `Invoice dobel ${dup.invoiceNumber} (periode tumpang tindih) dihapus otomatis setelah pembayaran ${paid.invoiceNumber}`,
+        );
+      }
+    } catch (err) {
+      // Jangan gagalkan pembayaran hanya karena cleanup error.
+      this.logger.error(`Gagal bersihkan invoice dobel utk ${paid.invoiceNumber}: ${(err as Error).message}`);
+    }
   }
 
   // Digunakan oleh isolir scheduler untuk mencari tagihan yang sudah lewat jatuh

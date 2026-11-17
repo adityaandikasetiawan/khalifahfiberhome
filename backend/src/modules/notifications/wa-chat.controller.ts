@@ -39,6 +39,17 @@ export class WaChatController {
     return { count: await this.service.unreadCount() };
   }
 
+  @Get("usage")
+  @ApiOperation({ summary: "Statistik & biaya penggunaan WhatsApp (pesan keluar x biaya/pesan)" })
+  usage(
+    @Query("cost") cost?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    const costPerMessage = cost ? Number(cost) : 500;
+    return this.service.usageStats(costPerMessage, from, to);
+  }
+
   @Get(":phone")
   @ApiOperation({ summary: "Histori percakapan 1 nomor + tandai sudah dibaca" })
   conversation(@Param("phone") phone: string, @Query("limit") limit?: string) {

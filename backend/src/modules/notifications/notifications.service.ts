@@ -23,11 +23,31 @@ function invoiceBlock(ctx: any): string {
 }
 
 const DIV = "━━━━━━━━━━━━━━━━━━━━";
-// Peringatan: pembayaran WAJIB lewat sistem, bukan transfer manual ke rekening pribadi.
-const PAY_WARNING =
-  `⚠️ *Pembayaran hanya melalui link resmi di atas.*\n` +
-  `Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi). ` +
-  `Pembayaran di luar sistem tidak tercatat & layanan tidak otomatis aktif.`;
+
+// Rekening resmi tujuan transfer manual (a/n Purwo Budi Sunaryono).
+const BANK_ACCOUNT_NAME = "Purwo Budi Sunaryono";
+const BANK_ACCOUNTS = [
+  { bank: "BRI", accountNo: "454001025033539" },
+  { bank: "SeaBank", accountNo: "901370540964" },
+];
+
+// Instruksi pembayaran via transfer manual ke rekening resmi (WhatsApp mendukung *tebal*).
+function payInstruction(ctx: any): string {
+  const nominal = ctx?.amount ? `💵 *Nominal* : Rp ${ctx.amount}\n` : "";
+  const rekening = BANK_ACCOUNTS.map(
+    (a) => `• *${a.bank}* ${a.accountNo} a/n ${BANK_ACCOUNT_NAME}`,
+  ).join("\n");
+  return (
+    `🏦 *Pembayaran via Transfer Bank*\n` +
+    `${nominal}${rekening}\n` +
+    `Setelah transfer, kirim bukti ke WhatsApp admin agar layanan segera diaktifkan. Terima kasih 🙏`
+  );
+}
+
+// Narasi transfer untuk email (plain text).
+const EMAIL_PAY_NOTE =
+  `Pembayaran via transfer bank ke rekening ${BANK_ACCOUNTS.map((a) => `${a.bank} ${a.accountNo}`).join(" atau ")} a/n ${BANK_ACCOUNT_NAME}` +
+  `. Setelah transfer, kirim bukti ke WhatsApp admin agar layanan segera diaktifkan.`;
 
 const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
   invoice_created: (ctx) =>
@@ -35,7 +55,7 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan internet Anda telah terbit.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Bayar sekarang* (tanpa login):\n${ctx.paymentLink}\n\n` +
-    `${PAY_WARNING}\n\n` +
+    `${payInstruction(ctx)}\n\n` +
     `Abaikan pesan ini jika sudah membayar. Terima kasih 🙏\n_${BRAND}_`,
 
   reminder_h3: (ctx) =>
@@ -43,7 +63,7 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan Anda akan *jatuh tempo dalam 3 hari*.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Bayar sekarang*:\n${ctx.paymentLink}\n\n` +
-    `${PAY_WARNING}\n\n` +
+    `${payInstruction(ctx)}\n\n` +
     `Mohon siapkan pembayaran ya. Terima kasih 🙏\n_${BRAND}_`,
 
   reminder_h1: (ctx) =>
@@ -51,7 +71,7 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan Anda *jatuh tempo besok*.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Bayar sekarang*:\n${ctx.paymentLink}\n\n` +
-    `${PAY_WARNING}\n\n` +
+    `${payInstruction(ctx)}\n\n` +
     `Bayar sebelum jatuh tempo agar layanan tetap aktif 🙏\n_${BRAND}_`,
 
   overdue: (ctx) =>
@@ -59,14 +79,14 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: any) => string> = {
     `Halo *${ctx.customerName}*, tagihan Anda telah *melewati jatuh tempo*.\n\n` +
     `${invoiceBlock(ctx)}\n${DIV}\n` +
     `💳 *Segera bayar* untuk menghindari pemutusan layanan:\n${ctx.paymentLink}\n\n` +
-    `${PAY_WARNING}\n\n` +
+    `${payInstruction(ctx)}\n\n` +
     `_${BRAND}_`,
 
   isolir: (ctx) =>
     `*LAYANAN DINONAKTIFKAN* 🔌\n${DIV}\n` +
     `Halo *${ctx.customerName}*, mohon maaf layanan internet Anda kami *nonaktifkan sementara* karena tunggakan tagihan *${ctx.invoiceNumber}*.\n\n` +
     `💳 *Bayar untuk aktif kembali* (otomatis):\n${ctx.paymentLink}\n\n` +
-    `${PAY_WARNING}\n\n` +
+    `${payInstruction(ctx)}\n\n` +
     `Layanan aktif kembali segera setelah pembayaran diterima 🙏\n_${BRAND}_`,
 
   payment_success: (ctx) =>
@@ -166,9 +186,9 @@ export class NotificationsService {
           rows: invoiceRows,
           amount: ctx.amount ? `Rp ${ctx.amount}` : undefined,
           amountLabel: "Total Tagihan",
-          buttonText: ctx.paymentLink ? "Bayar Sekarang" : undefined,
+          buttonText: ctx.paymentLink ? "Lihat Tagihan & Info Transfer" : undefined,
           buttonUrl: ctx.paymentLink,
-          note: "Pembayaran hanya melalui tombol/link resmi di atas. Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi) — pembayaran di luar sistem tidak tercatat dan layanan tidak otomatis aktif. Abaikan email ini jika Anda sudah membayar.",
+          note: `${EMAIL_PAY_NOTE} Abaikan email ini jika Anda sudah membayar.`,
         };
       case "reminder_h3":
       case "reminder_h1":
@@ -181,9 +201,9 @@ export class NotificationsService {
           rows: invoiceRows,
           amount: ctx.amount ? `Rp ${ctx.amount}` : undefined,
           amountLabel: "Total Tagihan",
-          buttonText: ctx.paymentLink ? "Bayar Sekarang" : undefined,
+          buttonText: ctx.paymentLink ? "Lihat Tagihan & Info Transfer" : undefined,
           buttonUrl: ctx.paymentLink,
-          note: "Pembayaran hanya melalui tombol/link resmi di atas. Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi).",
+          note: EMAIL_PAY_NOTE,
         };
       case "overdue":
         return {
@@ -193,9 +213,9 @@ export class NotificationsService {
           rows: invoiceRows,
           amount: ctx.amount ? `Rp ${ctx.amount}` : undefined,
           amountLabel: "Total Tagihan",
-          buttonText: ctx.paymentLink ? "Bayar Sekarang" : undefined,
+          buttonText: ctx.paymentLink ? "Lihat Tagihan & Info Transfer" : undefined,
           buttonUrl: ctx.paymentLink,
-          note: "Pembayaran hanya melalui tombol/link resmi di atas. Mohon JANGAN transfer manual ke rekening pribadi (termasuk a/n Pak Budi).",
+          note: EMAIL_PAY_NOTE,
         };
       case "isolir":
         return {

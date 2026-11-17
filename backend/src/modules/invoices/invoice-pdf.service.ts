@@ -98,6 +98,13 @@ export class InvoicePdfService {
     const st = this.statusLabel(invoice.status);
     const logoBuf = await this.getLogoBuffer();
 
+    // Catatan pembayaran (mis. "Transfer BCA a/n Budi", "Tunai ke Rigendi")
+    // dari pembayaran sukses — untuk tracking pembayaran manual.
+    const payments = ((invoice as any).payments ?? []) as any[];
+    const paidPayment = payments.find((p) => p.status === "success") ?? payments[payments.length - 1];
+    const paymentNote: string | undefined = paidPayment?.rawPayload?.note || undefined;
+    const isManualPayment = paidPayment?.rawPayload?.manual === true;
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true });
       const chunks: Buffer[] = [];
@@ -224,6 +231,30 @@ export class InvoicePdfService {
       doc.moveTo(tbx, y).lineTo(right, y).lineWidth(0.5).strokeColor("#DDDDDD").stroke();
       y += 8;
       totalRow("TOTAL", this.rupiah(invoice.totalAmount), true);
+
+      // ── Catatan Pembayaran (tracking manual) ────────────────────────
+      if (invoice.status === "paid" && paymentNote) {
+        y += 8;
+        const boxH = 44;
+        doc.roundedRect(left, y, contentW, boxH, 4).fillColor("#F3F6F5").fill();
+        doc.fillColor(this.BRAND).font("Helvetica-Bold").fontSize(9).text(
+          `Catatan Pembayaran${isManualPayment ? " (Manual)" : ""}`,
+          left + 10,
+          y + 8,
+        );
+        doc.fillColor(this.INK).font("Helvetica").fontSize(9).text(paymentNote, left + 10, y + 23, {
+          width: contentW - 20,
+        });
+        if (invoice.paidAt) {
+          doc.fillColor(this.MUTED).fontSize(7.5).text(
+            `Dibayar: ${this.tanggal(invoice.paidAt)}`,
+            left + 10,
+            y + boxH - 2,
+            { width: contentW - 20, align: "right" },
+          );
+        }
+        y += boxH + 4;
+      }
 
       // ── Catatan kaki ────────────────────────────────────────────────
       const footY = doc.page.height - 90;

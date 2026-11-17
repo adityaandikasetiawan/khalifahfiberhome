@@ -2,10 +2,8 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Copy, Loader2, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
-import { QRCodeSVG } from "qrcode.react";
-import { BankLogo, BANK_CONFIG, EWALLET_CONFIG } from "@/components/bank-logo";
 
 interface InvoiceItem { description: string; amount: number; }
 interface InvoiceDetail {
@@ -19,12 +17,15 @@ interface InvoiceDetail {
   customerName?: string;
   packageName?: string;
 }
-interface PaymentResult {
-  url?: string; paymentNo?: string; paymentName?: string; vaNumber?: string;
-  qrImage?: string; qrString?: string; paymentMethod?: string; expired?: string;
-  total?: number; subTotal?: number; fee?: number; transactionId?: number;
-  message?: string; mock?: boolean; order_id?: string;
-}
+
+// Rekening resmi tujuan transfer manual (a/n Purwo Budi Sunaryono).
+const BANK_ACCOUNT_NAME = "Purwo Budi Sunaryono";
+const BANK_ACCOUNTS = [
+  { bank: "BRI", accountNo: "454001025033539" },
+  { bank: "SeaBank", accountNo: "901370540964" },
+];
+// Nomor WhatsApp admin untuk kirim bukti transfer (konsisten dgn kontak portal).
+const ADMIN_WA = "6282128052229";
 
 function BayarInner() {
   const searchParams = useSearchParams();
@@ -33,13 +34,7 @@ function BayarInner() {
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("qris");
-  const [paymentChannel, setPaymentChannel] = useState("");
-  const [paying, setPaying] = useState(false);
-  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
-  const [error, setError] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [checkMsg, setCheckMsg] = useState("");
+  const [copiedAcc, setCopiedAcc] = useState("");
 
   useEffect(() => {
     if (!token) {
@@ -54,51 +49,10 @@ function BayarInner() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  const handlePay = async () => {
-    setError("");
-    setPaying(true);
-    try {
-      const res = await api.post(`/pay/${token}`, { paymentMethod, paymentChannel: paymentChannel || undefined });
-      const body = res.data.data ?? res.data;
-      const gw = body.gateway ?? body;
-      const method = gw.paymentMethod ?? paymentMethod;
-      const isQris = method === "qris";
-      setPaymentResult({
-        url: gw.url,
-        paymentNo: gw.paymentNo,
-        paymentName: gw.paymentName,
-        vaNumber: isQris ? undefined : (gw.vaNumber ?? gw.paymentNo),
-        qrImage: gw.qrImage ?? gw.QrImage,
-        qrString: gw.qrString ?? gw.QrString ?? (isQris ? gw.paymentNo : undefined),
-        paymentMethod: method,
-        expired: gw.expired, total: gw.total, subTotal: gw.subTotal, fee: gw.fee,
-        transactionId: gw.transactionId, message: gw.message, mock: gw.mock, order_id: gw.order_id,
-      });
-      if (gw.url) window.open(gw.url, "_blank");
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? "Gagal memproses pembayaran. Coba lagi.");
-    } finally {
-      setPaying(false);
-    }
-  };
-
-  const handleCheckStatus = async () => {
-    setChecking(true);
-    setCheckMsg("");
-    try {
-      const res = await api.post(`/pay/${token}/check`);
-      const data = res.data.data ?? res.data;
-      setCheckMsg(data.message ?? "");
-      if (data.status === "paid") {
-        const inv = await api.get(`/pay/${token}`);
-        setInvoice(inv.data.data ?? inv.data);
-        setPaymentResult(null);
-      }
-    } catch (err: any) {
-      setCheckMsg(err?.response?.data?.message ?? "Gagal mengecek status. Coba lagi.");
-    } finally {
-      setChecking(false);
-    }
+  const handleCopy = (accountNo: string) => {
+    navigator.clipboard?.writeText(accountNo);
+    setCopiedAcc(accountNo);
+    setTimeout(() => setCopiedAcc(""), 2000);
   };
 
   if (loading) {
@@ -124,6 +78,11 @@ function BayarInner() {
   }
 
   const isPaid = invoice.status === "paid";
+  const nominal = `Rp ${invoice.amount.toLocaleString("id-ID")}`;
+  const waMessage = encodeURIComponent(
+    `Halo admin, saya sudah transfer untuk tagihan ${invoice.invoiceNumber} sebesar ${nominal}. Berikut bukti transfernya.`,
+  );
+  const waLink = `https://wa.me/${ADMIN_WA}?text=${waMessage}`;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-primary/5 via-background to-accent/30">
@@ -182,149 +141,62 @@ function BayarInner() {
 
           <div className="mt-6 flex items-center justify-between border-t pt-4">
             <span className="font-semibold">Total</span>
-            <span className="text-xl font-bold text-primary">Rp {invoice.amount.toLocaleString("id-ID")}</span>
+            <span className="text-xl font-bold text-primary">{nominal}</span>
           </div>
         </div>
 
-        {isPaid && (
+        {isPaid ? (
           <div className="mt-6 rounded-xl border border-green-200 bg-green-50 p-6 text-center">
             <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" />
             <p className="mt-2 font-semibold text-green-700">Tagihan ini sudah lunas. Terima kasih!</p>
           </div>
-        )}
-
-        {!isPaid && !paymentResult && (
+        ) : (
           <div className="mt-6 rounded-xl border bg-card p-6 shadow-sm">
-            <h3 className="font-semibold">Pilih Metode Pembayaran</h3>
-            {error && <div className="mt-3 rounded-lg bg-destructive/10 px-4 py-2.5 text-sm text-destructive">{error}</div>}
+            <h3 className="font-semibold">Pembayaran via Transfer Bank</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Transfer sesuai nominal tagihan ke salah satu rekening resmi berikut:
+            </p>
 
-            <div className="mt-4">
-              <label className="text-sm font-medium">Metode Pembayaran</label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => { setPaymentMethod(e.target.value); setPaymentChannel(""); }}
-                className="mt-1 w-full rounded-lg border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="qris">QRIS (semua e-wallet & m-banking)</option>
-                <option value="va">Virtual Account (Transfer Bank)</option>
-                <option value="ewallet">E-Wallet</option>
-              </select>
+            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+              <p className="text-xs text-muted-foreground">Nominal yang harus dibayar</p>
+              <p className="text-2xl font-bold text-primary">{nominal}</p>
             </div>
 
-            {paymentMethod === "qris" && (
-              <div className="mt-3 flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/payment_gateway/qris.png" alt="QRIS" loading="lazy" className="h-10 w-auto object-contain" />
-                <span className="text-xs text-muted-foreground">Scan dengan aplikasi e-wallet / m-banking apa pun yang mendukung QRIS.</span>
-              </div>
-            )}
-
-            {paymentMethod === "va" && (
-              <div className="mt-3">
-                <label className="text-sm font-medium">Pilih Bank</label>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {Object.entries(BANK_CONFIG).map(([key, cfg]) => (
-                    <button key={key} type="button" onClick={() => setPaymentChannel(key)}
-                      className={`flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all ${paymentChannel === key ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/40"}`}>
-                      <BankLogo channel={key} className="h-8 w-16 text-[11px]" />
-                      <span className="text-xs font-medium">{cfg.label}</span>
+            <div className="mt-4 space-y-3">
+              {BANK_ACCOUNTS.map((acc) => (
+                <div key={acc.accountNo} className="rounded-lg border p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-semibold">{acc.bank}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(acc.accountNo)}
+                      className="flex items-center gap-1 rounded-md border border-primary/30 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {copiedAcc === acc.accountNo ? "Tersalin" : "Salin"}
                     </button>
-                  ))}
+                  </div>
+                  <p className="mt-2 font-mono text-lg font-bold tracking-wide">{acc.accountNo}</p>
+                  <p className="text-sm text-muted-foreground">a/n {BANK_ACCOUNT_NAME}</p>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
 
-            {paymentMethod === "ewallet" && (
-              <div className="mt-3">
-                <label className="text-sm font-medium">Pilih E-Wallet</label>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {Object.entries(EWALLET_CONFIG).map(([key, cfg]) => (
-                    <button key={key} type="button" onClick={() => setPaymentChannel(key)}
-                      className={`flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all ${paymentChannel === key ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/40"}`}>
-                      <BankLogo channel={key} className="h-8 w-16 text-[11px]" />
-                      <span className="text-xs font-medium">{cfg.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <div className="mt-5 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <p className="font-semibold">Setelah transfer</p>
+              <p className="mt-1">
+                Kirim bukti transfer ke WhatsApp admin. Layanan akan diaktifkan setelah pembayaran diverifikasi.
+              </p>
+            </div>
 
-            <button
-              onClick={handlePay}
-              disabled={paying || ((paymentMethod === "va" || paymentMethod === "ewallet") && !paymentChannel)}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            <a
+              href={waLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Bayar Sekarang"}
-            </button>
-          </div>
-        )}
-
-        {paymentResult && (
-          <div className="mt-6 rounded-xl border border-primary/20 bg-card p-6 shadow-sm">
-            <div className="mb-4 flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold">Instruksi Pembayaran</h3>
-            </div>
-
-            {(paymentResult.qrString || paymentResult.qrImage) ? (
-              <div className="overflow-hidden rounded-xl border">
-                <div className="bg-primary px-4 py-3 text-center"><p className="font-semibold text-primary-foreground">Bayar dengan QRIS</p></div>
-                <div className="p-6 text-center">
-                  <div className="mx-auto inline-block rounded-lg bg-white p-3">
-                    {paymentResult.qrString ? (
-                      <QRCodeSVG value={paymentResult.qrString} size={256} level="M" includeMargin />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={paymentResult.qrImage} alt="QRIS" className="h-64 w-64" />
-                    )}
-                  </div>
-                </div>
-                <div className="divide-y border-t text-sm">
-                  <div className="flex justify-between bg-muted/40 px-4 py-3">
-                    <span className="font-semibold">Total</span>
-                    <span className="font-bold text-primary">Rp {Number(paymentResult.total ?? invoice.amount).toLocaleString("id-ID")}</span>
-                  </div>
-                </div>
-                <ul className="space-y-1.5 border-t px-4 py-4 text-xs text-muted-foreground">
-                  <li>• Scan QR di atas dengan aplikasi e-wallet atau m-banking yang mendukung QRIS.</li>
-                  {paymentResult.expired && <li>• Berlaku s/d {paymentResult.expired}.</li>}
-                </ul>
-              </div>
-            ) : paymentResult.vaNumber ? (
-              <div className="overflow-hidden rounded-xl border">
-                <div className="flex items-center justify-between bg-muted/40 px-4 py-3">
-                  <span className="font-semibold">Virtual Account</span>
-                  {paymentChannel && <BankLogo channel={paymentChannel} className="h-7 w-16 text-[11px]" />}
-                </div>
-                <div className="p-5">
-                  <p className="mb-1 text-xs text-muted-foreground">Nomor Virtual Account</p>
-                  <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
-                    <span className="font-mono text-lg font-bold tracking-wide text-primary">{paymentResult.vaNumber}</span>
-                    <button type="button" onClick={() => { navigator.clipboard?.writeText(String(paymentResult.vaNumber)); setCheckMsg("Nomor VA disalin."); }}
-                      className="rounded-md border border-primary/30 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/10">Salin</button>
-                  </div>
-                </div>
-                <ul className="space-y-1.5 border-t px-4 py-4 text-xs text-muted-foreground">
-                  <li>• Transfer ke nomor VA di atas via ATM/m-banking/internet banking.</li>
-                  {paymentResult.expired && <li>• Bayar sebelum {paymentResult.expired}.</li>}
-                </ul>
-              </div>
-            ) : null}
-
-            {paymentResult.url && (
-              <a href={paymentResult.url} target="_blank" rel="noopener noreferrer"
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-                Lanjutkan ke Halaman Pembayaran
-              </a>
-            )}
-
-            <button onClick={handleCheckStatus} disabled={checking}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-primary/30 py-3 font-medium text-primary hover:bg-primary/5 transition-colors disabled:opacity-50">
-              {checking ? (<><Loader2 className="h-4 w-4 animate-spin" /> Mengecek...</>) : "Saya Sudah Bayar / Cek Status"}
-            </button>
-            {checkMsg && <p className="mt-3 rounded-lg bg-blue-50 px-4 py-2.5 text-sm text-blue-700">{checkMsg}</p>}
-            {paymentResult.message && <p className="mt-4 rounded-lg bg-blue-50 px-4 py-2.5 text-sm text-blue-700">{paymentResult.message}</p>}
-            <p className="mt-4 text-xs text-muted-foreground">Status tagihan otomatis menjadi "Lunas" setelah pembayaran diterima.</p>
+              Kirim Bukti Transfer ke WhatsApp Admin
+            </a>
           </div>
         )}
       </div>

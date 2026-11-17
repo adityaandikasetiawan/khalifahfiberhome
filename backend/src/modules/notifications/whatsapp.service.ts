@@ -164,6 +164,10 @@ export class WhatsAppService implements OnModuleInit {
       puppeteer: {
         headless: true,
         executablePath,
+        // Naikkan timeout protokol CDP. Default membuat "Runtime.callFunctionOn
+        // timed out" saat Chromium lambat merespons (server RAM terbatas),
+        // menyebabkan pengiriman WA gagal. 120 detik memberi ruang lebih.
+        protocolTimeout: 120000,
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -173,6 +177,13 @@ export class WhatsAppService implements OnModuleInit {
           "--no-zygote",
           "--disable-gpu",
           "--disable-extensions",
+          // Hemat memori Chromium di server dengan RAM terbatas (mengurangi
+          // kemungkinan tab hang/crash yang memicu timeout).
+          "--disable-background-networking",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          "--js-flags=--max-old-space-size=256",
         ],
       },
     });
